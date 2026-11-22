@@ -10,42 +10,62 @@ stock Udon VM — nothing custom runs at world runtime.
 using BetterUdon;
 using System.Collections.Generic;
 
-[System.Serializable]
-public struct InventorySlot
+// A normal C# struct. BetterUdon gives it real value semantics.
+public struct Weapon
 {
-    public int itemId;
-    public float durability;
+    public string name;
+    public int damage;
 
-    public InventorySlot(int itemId, float durability)
+    public Weapon(string name, int damage)
     {
-        this.itemId = itemId;
-        this.durability = durability;
+        this.name = name;
+        this.damage = damage;
     }
 
-    public void Wear(float amount) => durability -= amount;
+    public void Upgrade(int amount)
+    {
+        damage += amount;          // mutates this value
+    }
 }
 
-public class Player : BetterUdonBehaviour
+public class PlayerInventory : BetterUdonBehaviour
 {
-    public InventorySlot[] slots = new InventorySlot[4];
-    public List<InventorySlot> backpack;
+    [BetterUdonSynced] public int coins;
+
+    public List<Weapon> bag;       // created in Start
+    public Weapon equipped;
 
     private void Start()
     {
-        slots[0] = new InventorySlot(100, 1f);
-        backpack = new List<InventorySlot>();
-        backpack.Add(new InventorySlot(7, 0.5f));
+        bag = new List<Weapon>();
+        bag.Add(new Weapon("Sword", 10));
+        bag.Add(new Weapon("Bow", 6));
 
-        InventorySlot copy = slots[0];   // deep copy
-        copy.Wear(0.5f);                 // does not touch slots[0]
+        // Structs are copied by value: this is a copy of the sword.
+        equipped = bag[0];
+        equipped.Upgrade(5);       // equipped.damage becomes 15; bag[0].damage stays 10
     }
 
-    public void Interact()
+    public void Equip(int slot)
     {
-        backpack[0].Wear(0.1f);          // value semantics per element
+        equipped = bag[slot];      // copy the chosen weapon into `equipped`
+        RequestSerialization();
+    }
+
+    public bool Buy(Weapon weapon, int price)
+    {
+        if (coins < price)
+            return false;
+
+        coins -= price;
+        bag.Add(weapon);
+        RequestSerialization();
+        return true;
     }
 }
 ```
+
+Notice that `Weapon` is just a struct, `List<Weapon>` is just a list, and the synced `coins` field is a plain int. The only BetterUdon-specific parts are the base class and the `[BetterUdonSynced]` attribute. Collections are created in `Start` because field initializers must be compile-time constants.
 
 ## Install
 
