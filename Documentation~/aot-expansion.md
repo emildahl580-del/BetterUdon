@@ -50,13 +50,13 @@ Use the fact that all project types are visible at compile time.
 - [ ] Cross-behaviour delegate targets: synchronous inlining where possible; document the
       asynchronous event boundary when it is not.
 - [~] Lambdas and closures. Non-capturing lambdas work; capturing lambdas are rejected.
-- [ ] `is` / `as` / casts against known BetterUdon and user types.
+- [x] `is` / `as` / casts against known BetterUdon types and interfaces (BCL runtime type tests remain limited).
 - [x] Diagnostics for open-world or missing implementations.
 - [x] Virtual/interface properties.
 - [x] Virtual/interface indexers.
 - [~] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
       get and set, virtual indexer, parameterless and typed Action/Func method groups, multicast and
-      events, null delegates, non-capturing lambdas.
+      events, null delegates, non-capturing lambdas, `is`/`as` on behaviour types.
 - [ ] Tests: struct implementation, null target, capturing lambda/closure, cross-behaviour delegate.
 
 ## 4. Collections
@@ -96,7 +96,8 @@ Reassess what pure AOT can still cover once the above land:
 
 - [ ] `try`/`catch`/`finally` over compiler-generated errors (guarded operations).
 - [ ] `using`/`IDisposable` lowering.
-- [ ] Pattern matching breadth (`switch` expressions, property patterns, list patterns).
+- [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns
+      work; property, list and type patterns are still pending.
 - [ ] `record` structs and generated equality/`ToString`.
 - [ ] More BCL helpers that map to existing externs or lowered code.
 - [ ] Document which remaining features genuinely require an interpreter or native runtime.

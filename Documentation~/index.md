@@ -530,9 +530,11 @@ public class Shooter : BetterUdonBehaviour
 ```
 
 `base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch. Virtual
-and interface properties use the same type-marker switch for their getter and setter. The receiver must
-be a BetterUdon behaviour; plain classes and structs are not part of the type-marker table yet.
-Indexers and delegates are still open items in `Documentation~/aot-expansion.md`.
+and interface properties use the same type-marker switch for their getter and setter. `is` and `as`
+against known BetterUdon types/interfaces use the same marker table; BCL runtime type tests are not
+available. The receiver must be a BetterUdon behaviour; plain classes and structs are not part of the
+type-marker table yet. BCL runtime type tests, struct receivers and cross-behaviour delegate targets are
+still open in `Documentation~/aot-expansion.md`.
 
 ---
 

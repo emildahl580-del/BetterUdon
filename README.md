@@ -150,6 +150,7 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
 - **Virtual and interface calls** — closed-world dispatch over the receiver's type marker for methods
   and properties; each implementation is inlined with the receiver bound, so calls are synchronous.
+  `is`/`as` against known behaviour types use the same marker.
 - **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
   `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T`, nested generic calls and numeric
   `IComparable<T>.CompareTo` constraints.

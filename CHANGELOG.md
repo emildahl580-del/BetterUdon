@@ -14,7 +14,9 @@
   direct comparisons.
 - Closed-world dispatch for `virtual`, `override`, `abstract` and interface method calls. Receiver
   type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
-  Virtual and interface properties use the same dispatch for getters and setters.
+  Virtual and interface properties/indexers use the same dispatch for getters and setters. `is`/`as`
+  against known behaviour types use the marker table.
+- Switch expressions with constant, relational, `when` and discard patterns.
 - `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` intrinsics, including growth, struct
   elements/values, string keys, `TryGetValue` and `KeyValuePair` foreach. Dictionary uses linear search
   for correct member-wise equality.

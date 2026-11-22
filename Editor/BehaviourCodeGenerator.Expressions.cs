@@ -137,6 +137,9 @@ namespace BetterUdon.Editor
                 case ConditionalExpressionSyntax conditional:
                     return EmitConditional(conditional);
 
+                case SwitchExpressionSyntax switchExpression:
+                    return EmitSwitchExpression(switchExpression);
+
                 case InterpolatedStringExpressionSyntax interpolated:
                     return EmitInterpolatedString(interpolated);
 
@@ -404,14 +407,14 @@ namespace BetterUdon.Editor
             if (binary.IsKind(SyntaxKind.CoalesceExpression))
                 return EmitCoalesce(binary);
 
+            if (binary.IsKind(SyntaxKind.IsExpression))
+                return EmitTypeTest(binary, false);
+
+            if (binary.IsKind(SyntaxKind.AsExpression))
+                return EmitTypeTest(binary, true);
+
             Slot left = EmitExpression(binary.Left);
             Slot right = EmitExpression(binary.Right);
-
-            if (binary.IsKind(SyntaxKind.IsExpression))
-            {
-                AddError("'is' expressions are not supported by the BetterUdon compiler.", binary);
-                return NewSlot(_boolType, "bad");
-            }
 
             IMethodSymbol operatorMethod = GetSymbolInfo(binary).Symbol as IMethodSymbol;
             ITypeSymbol leftType = GetType(binary.Left);
@@ -752,6 +755,99 @@ namespace BetterUdon.Editor
 
             return named.GetMembers().OfType<IMethodSymbol>().FirstOrDefault(m =>
                 m.Name == name && m.IsStatic && m.Parameters.Length == 2);
+        }
+
+        private Slot EmitSwitchExpression(SwitchExpressionSyntax switchExpression)
+        {
+            ITypeSymbol resultType = GetType(switchExpression) ?? _objectType;
+            Slot result = NewSlot(resultType, "switchExpr");
+            EmitDefaultValue(result, resultType);
+
+            Slot subject = EmitExpression(switchExpression.GoverningExpression);
+            ITypeSymbol subjectType = GetType(switchExpression.GoverningExpression) ?? _objectType;
+            string endLabel = NewLabel("switchExprEnd");
+            SwitchExpressionArmSyntax defaultArm = null;
+
+            foreach (SwitchExpressionArmSyntax arm in switchExpression.Arms)
+            {
+                if (arm.Pattern is DiscardPatternSyntax)
+                {
+                    defaultArm = arm;
+                    continue;
+                }
+
+                string nextLabel = NewLabel("switchExprNext");
+                Slot matches;
+
+                if (arm.Pattern is ConstantPatternSyntax constantPattern)
+                {
+                    matches = EmitBinaryOperator(subject, EmitExpression(constantPattern.Expression), subjectType,
+                        "op_Equality", _boolType, arm);
+                }
+                else if (arm.Pattern is RelationalPatternSyntax relationalPattern)
+                {
+                    string opName = RelationalOperator(relationalPattern.OperatorToken.Kind());
+                    matches = EmitBinaryOperator(subject, EmitExpression(relationalPattern.Expression), subjectType,
+                        opName, _boolType, arm);
+                }
+                else
+                {
+                    AddError($"Switch expression pattern '{arm.Pattern.Kind()}' is not supported.", arm);
+                    continue;
+                }
+
+                _asm.JumpIfFalse(matches, nextLabel);
+
+                if (arm.WhenClause != null)
+                {
+                    Slot guard = EmitCondition(arm.WhenClause.Condition);
+                    _asm.JumpIfFalse(guard, nextLabel);
+                }
+
+                Slot value = EmitExpression(arm.Expression);
+                if (value != null)
+                    Copy(ConvertTo(value, resultType), result);
+
+                _asm.Jump(endLabel);
+                _asm.MarkLabel(nextLabel);
+            }
+
+            if (defaultArm != null)
+            {
+                if (defaultArm.WhenClause != null)
+                {
+                    Slot guard = EmitCondition(defaultArm.WhenClause.Condition);
+                    string skipDefault = NewLabel("switchExprSkipDefault");
+                    _asm.JumpIfFalse(guard, skipDefault);
+
+                    Slot value = EmitExpression(defaultArm.Expression);
+                    if (value != null)
+                        Copy(ConvertTo(value, resultType), result);
+
+                    _asm.MarkLabel(skipDefault);
+                }
+                else
+                {
+                    Slot value = EmitExpression(defaultArm.Expression);
+                    if (value != null)
+                        Copy(ConvertTo(value, resultType), result);
+                }
+            }
+
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
+        private static string RelationalOperator(SyntaxKind kind)
+        {
+            switch (kind)
+            {
+                case SyntaxKind.LessThanToken: return "op_LessThan";
+                case SyntaxKind.LessThanEqualsToken: return "op_LessThanOrEqual";
+                case SyntaxKind.GreaterThanToken: return "op_GreaterThan";
+                case SyntaxKind.GreaterThanEqualsToken: return "op_GreaterThanOrEqual";
+                default: return "op_Equality";
+            }
         }
 
         private Slot EmitConditional(ConditionalExpressionSyntax conditional)

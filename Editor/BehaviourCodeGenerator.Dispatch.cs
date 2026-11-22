@@ -339,6 +339,140 @@ namespace BetterUdon.Editor
             return null;
         }
 
+        private Slot EmitTypeTest(BinaryExpressionSyntax binary, bool asExpression)
+        {
+            ITypeSymbol targetType = Substitute(GetTypeInfo(binary.Right).Type);
+            ITypeSymbol sourceType = GetType(binary.Left);
+            Slot value = EmitExpression(binary.Left);
+
+            if (targetType == null)
+            {
+                AddError($"Unable to resolve the type in '{binary}'.", binary);
+                return asExpression ? NewSlot(_objectType, "bad") : NewSlot(_boolType, "bad");
+            }
+
+            Slot result = asExpression ? NewSlot(targetType, "asType") : NewSlot(_boolType, "isType");
+
+            if (asExpression)
+                EmitDefaultValue(result, targetType);
+            else
+                Copy(ConstantSlot(_boolType, false), result);
+
+            if (value == null)
+                return result;
+
+            if (targetType.SpecialType == SpecialType.System_Object)
+            {
+                if (asExpression)
+                    Copy(ConvertTo(value, targetType), result);
+                else
+                    Copy(EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
+                        "op_Inequality", _boolType, binary), result);
+
+                return result;
+            }
+
+            if (UdonTypeSystem.IsUserStruct(targetType))
+            {
+                if (asExpression)
+                {
+                    AddError("'as' cannot be used with a struct type.", binary);
+                    return result;
+                }
+
+                bool same = SymbolEqualityComparer.Default.Equals(sourceType, targetType);
+                Copy(ConstantSlot(_boolType, same), result);
+                return result;
+            }
+
+            bool isBehaviourType = targetType.TypeKind == TypeKind.Interface ||
+                                   DerivesFromBetterUdon(targetType);
+
+            if (!isBehaviourType)
+            {
+                if (asExpression && targetType.IsValueType)
+                {
+                    AddError("'as' cannot be used with a value type.", binary);
+                    return result;
+                }
+
+                bool same = IsAssignableTo(sourceType, targetType);
+                if (same)
+                    Copy(asExpression ? ConvertTo(value, targetType) : ConstantSlot(_boolType, true), result);
+
+                return result;
+            }
+
+            string endLabel = NewLabel("typeTestEnd");
+            string notNull = NewLabel("typeTestNotNull");
+            Slot isNull = EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, binary);
+            _asm.JumpIfFalse(isNull, notNull);
+            _asm.Jump(endLabel);
+            _asm.MarkLabel(notNull);
+
+            Slot marker = EmitGetProgramVariable(value, TypeMarkerSymbol, "type test");
+            bool emitted = false;
+
+            foreach (INamedTypeSymbol candidate in GetDispatchBehaviourTypes())
+            {
+                if (!IsAssignableTo(candidate, targetType))
+                    continue;
+
+                Slot expected = ConstantSlot(_stringType, candidate.ToDisplayString());
+                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, binary);
+                string next = NewLabel("typeTestNext");
+                _asm.JumpIfFalse(matches, next);
+
+                if (asExpression)
+                    Copy(ConvertTo(value, targetType), result);
+                else
+                    Copy(ConstantSlot(_boolType, true), result);
+
+                _asm.Jump(endLabel);
+                _asm.MarkLabel(next);
+                emitted = true;
+            }
+
+            if (!emitted && sourceType != null && IsAssignableTo(sourceType, targetType))
+            {
+                if (asExpression)
+                    Copy(ConvertTo(value, targetType), result);
+                else
+                    Copy(ConstantSlot(_boolType, true), result);
+            }
+
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
+        private static bool IsAssignableTo(ITypeSymbol type, ITypeSymbol target)
+        {
+            if (type == null || target == null)
+                return false;
+
+            if (SymbolEqualityComparer.Default.Equals(type, target))
+                return true;
+
+            for (INamedTypeSymbol current = (type as INamedTypeSymbol)?.BaseType; current != null; current = current.BaseType)
+            {
+                if (SymbolEqualityComparer.Default.Equals(current, target))
+                    return true;
+            }
+
+            if (target.TypeKind == TypeKind.Interface && type is INamedTypeSymbol named)
+            {
+                foreach (INamedTypeSymbol implemented in named.AllInterfaces)
+                {
+                    if (SymbolEqualityComparer.Default.Equals(implemented, target))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+
         private List<DispatchTarget> GetDispatchTargets(IMethodSymbol method)
         {
             if (_dispatchTargets.TryGetValue(method, out List<DispatchTarget> cached))
