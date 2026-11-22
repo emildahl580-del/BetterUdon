@@ -116,7 +116,7 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 
 - **Structs** with real value semantics, constructors, mutating methods, nesting, arrays and
   member-wise `Equals`.
-- **`List<T>`** — `Count`, `Capacity`, indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`, `Remove`,
+- **`List<T>`** — `Count`, `Capacity` (read), indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`, `Remove`,
   `Clear`, `Contains`, `IndexOf`, `ToArray`, `foreach`.
 - `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
 - Local functions with captures; properties with explicit or expression-bodied accessors.

@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 1.0.0**
+**Version 1.6.1**
 
 ---
 
@@ -170,8 +170,9 @@ Key components:
 - **Conversions.** `ConvertTo` maps C# implicit and explicit conversions onto `SystemConvert.__ToX__`
   externs, with reference conversions free and struct copies explicit.
 - **Inlining.** Udon has no call stack, so every user method call — including constructors, local
-  functions and property accessors — is expanded at the call site. Recursion is detected and reported
-  as an error.
+  functions and property accessors — is normally expanded at the call site. Methods marked
+  `[RecursiveMethod]` are the exception: they are emitted once as a labelled block and recurse through
+  a manual frame stack (section 6). Unmarked recursion is still a compile error.
 - **Extern construction.** `UdonExternSignatures` builds the signature string from the Roslyn symbol
   and validates it against Udon's node registry; an unavailable extern becomes a compile error with
   the exact signature, not a runtime failure.
@@ -276,6 +277,8 @@ Every member is emitted inline:
 
 | Member | Implementation |
 | --- | --- |
+| `Count` | the stored `count` |
+| `Capacity` | the element array's length (read-only) |
 | `Add` | grow if `count == items.Length`, store, increment |
 | `Insert` | grow, shift up from the end, store |
 | `RemoveAt` | shift down, decrement |
@@ -309,12 +312,43 @@ and a copy never aliases the element.
 | `??` / `??=` | control flow |
 | `is null` / `is not null` | equality against an object-typed null constant |
 | `switch` / `when` | equality chain, guard evaluated after the match |
+| `?:` | control flow, both branches converted to the result type |
+| `nameof(x)` | compile-time string |
+| String interpolation | concatenation with the string `op_Addition` extern |
+| `foreach` over arrays or `List<T>` | index loop, element read per iteration |
 | `typeof(T)` | `System.Type` heap constant |
 | `GetComponent<T>()` | Udon's `SystemType` overload with an invisible type parameter |
 | Cross-behaviour `SendCustomEvent` | extern on the real receiver, not `this` |
+| `base.Method()` | inlined like the behaviour's own methods |
+| `[RecursiveMethod]` | emitted once as a jumpable block (see below) |
 | User defined enums | lowered to the underlying integer, so `switch`, `==`, casts and `[Flags]` are integer operations |
 | Extern enums (`KeyCode`, `Space`, ...) | keep their real Udon enum type; the registry exposes no operators for them, so compare as `(int)` |
 | Extern struct initialisers | `new Color(...)`, `new Vector3(...)` are evaluated in the editor and baked as values |
+
+### Recursion
+
+A normal call is inlined, which would expand forever if the method called itself. Marking a method
+`[RecursiveMethod]` changes that: it is emitted once as a labelled block instead of once per call site.
+
+A call pushes a return address onto Udon's evaluation stack and jumps to the block; the block returns
+with `JUMP_INDIRECT`, reading that address back off the stack. Parameters are ordinary slots inside the
+block, so arguments and return values work as usual.
+
+Re-entering the block would overwrite the slots the outer invocation is still using. Before a
+self-call, the compiler therefore pushes every slot allocated by the current frame onto a manual stack
+(`object[]` plus an `int` address) and restores them after the call returns. Struct slots are cloned
+when saved, so a recursive call cannot mutate its caller's values. The stack starts at 128 entries and
+grows to twice the size a frame needs when it fills up.
+
+A recursive method that is also an entry point — a parameterless Udon event, or a public parameterless
+`void` method — gets a small trampoline at that entry point, so the VM or `SendCustomEvent` can start
+it. The remaining restrictions are:
+
+- Only direct self-recursion. Calling another `[RecursiveMethod]` from inside one, or calling a
+  recursive method on another behaviour, is a compile error.
+- No `ref` / `out` / `in` parameters.
+- A Udon event that takes arguments cannot be a `[RecursiveMethod]`; move the recursion into a helper.
+- `[NetworkCallable]` and `[RecursiveMethod]` cannot be combined.
 
 ### Across behaviours
 
@@ -345,6 +379,8 @@ public class Door : BetterUdonBehaviour
 - **Methods are inlined**: the body is compiled into the caller with the receiver as `this`, so
   arguments, return values, nested calls and private fields all work, and the call returns
   immediately. The body only ever touches the receiver's variables.
+- **Base methods inline as well.** `base.Foo()` and an unqualified call to an inherited method are
+  treated like the behaviour's own methods; base fields are variables of the same program.
 - **Properties** work: an auto property reads/writes its backing variable, a property with accessor
   bodies is inlined the same way as a method. Indexers cannot cross behaviours.
 - **Accessibility still applies.** From outside a type only its accessible members can be named (C#
@@ -360,8 +396,9 @@ public class Door : BetterUdonBehaviour
 - **`GameObject.GetComponent<T>()` works** for BetterUdon behaviours: the lookup is done on the
   backing `UdonBehaviour` and then verified against a hidden type marker, so a different behaviour on
   that object yields `null`, exactly like `GetComponent` should.
-- **A GameObject can host several BetterUdon behaviours.** Each has its own backing `UdonBehaviour`,
-  and a typed `GetComponent<T>()` scans them and returns the one whose type marker matches (or null).
+- **A GameObject can host several BetterUdon behaviours**, including two components of the same type.
+  Each proxy has its own backing `UdonBehaviour`, and a typed `GetComponent<T>()` scans them and
+  returns the one whose type marker matches (or null).
 - **`GetComponentInChildren`/`InParent`** are rejected for behaviour types because Udon cannot search
   by behaviour type; pass the `GameObject` and call `GetComponent` on it.
 - **Explicit events remain available.** When the call must be asynchronous (a one-way notification, or
@@ -461,8 +498,10 @@ public void Send() => SendCustomNetworkEvent(NetworkEventTarget.All, nameof(Appl
 
 The compiler validates the same restrictions UdonSharp does (public, non-static, void, at most eight
 parameters, no `ref`/`out`, `params` or defaults, no overloads) and publishes the metadata the client
-uses to map arguments to heap variables. Each parameter is a symbol named `<name>__param`; the
-metadata carries the same names, so the receiving entry point reads exactly the values that were sent.
+uses to map arguments to heap variables. Each parameter is a symbol named
+`<Method>_<parameter>__param`; the metadata carries the same names, so the receiving entry point reads
+exactly the values that were sent. Including the method name keeps two callables that reuse a parameter
+name from sharing one heap variable.
 
 #### Reacting to synced values
 
@@ -552,20 +591,21 @@ round trip turns that into a compile error that names the asset.
 `Library/BetterUdonReport.txt` containing the generated assembly, diagnostics, entry points and
 assembled symbol table.
 
-The package ships with two behaviours used as an executable specification: one exercises struct
-semantics, one exercises the language features. Together they assert **60+ properties**, and are run
-inside the editor against the real VM.
+BetterUdon is developed against an executable specification: the reference project contains behaviour
+suites for language features, structs, networking, cross-behaviour calls and recursion, run inside the
+editor against the real VM. The language and struct suites alone assert 60+ properties.
 
 ---
 
 ## 9. Limits
 
-Some limits are properties of the target and cannot be compiled away:
+Some limits remain:
 
 - **Recursion needs `[RecursiveMethod]`.** A marked method is compiled as a jumpable block with a
-  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Mutual
-  recursion between two marked methods, `ref`/`out` parameters on a recursive method, and calling a
-  recursive method on another behaviour are not supported.
+  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Only direct
+  self-recursion is supported: mutual recursion, `ref` / `out` / `in` parameters, calling a recursive
+  method on another behaviour, and recursive Udon events with arguments are compile errors.
+  `[NetworkCallable]` cannot be combined with `[RecursiveMethod]` (section 6).
 - **No open generics at runtime.** A `T` cannot escape into a field or a runtime-constructed type,
   because the heap has no per-slot type identity and the VM cannot instantiate a generic type.
 - **No delegates or lambdas.** No callable object model exists to attach them to.
@@ -574,9 +614,10 @@ Some limits are properties of the target and cannot be compiled away:
   monomorphisation is possible; it is a front-end feature that has not been implemented.
 - **Collections beyond `List<T>`.** `Dictionary<K,V>` is feasible with linear probing but not
   implemented.
-- **Inspector limitation.** Auto properties and `List<T>` fields are real heap variables but their
-  backings are not Unity-serialisable, so they start at their default value rather than an authored
-  one.
+- **Field initialisers must be compile-time constants, and some backings are not serialisable.**
+  `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
+  backings and collection fields are real heap variables but are not Unity-serialisable, so they start
+  at their default value rather than an authored inspector value.
 - **Unity object references are not baked into the program.** A `Renderer` or `UdonBehaviour[]` field
   is a public variable; the heap starts without it and Udon fills it from the behaviour's public
   variable table on load. Udon stores programs without an object table, so such values cannot be

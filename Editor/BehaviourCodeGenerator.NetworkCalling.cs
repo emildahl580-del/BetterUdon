@@ -13,7 +13,7 @@ namespace BetterUdon.Editor
     /// The client sends the arguments, looks the entry point up by name and writes each parameter into
     /// a heap variable named after <see cref="NetworkCallingEntrypointMetadata.Parameters"/>. The
     /// compiler therefore declares an entry point whose parameter symbols are named
-    /// <c>&lt;name&gt;__param</c> and publishes matching metadata on the program asset.
+    /// <c>&lt;Method&gt;_&lt;parameter&gt;__param</c> and publishes matching metadata on the program asset.
     /// </summary>
     internal sealed partial class BehaviourCodeGenerator
     {
