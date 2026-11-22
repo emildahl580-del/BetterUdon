@@ -6,7 +6,8 @@ no custom runtime, no scene helper required for core language features.
 This file is the working checklist for the `feature-expansion` branch. Keep it updated as
 items land, and add new findings under the relevant section rather than keeping them in chat.
 
-Status values: `[x]` done and verified, `[~]` in progress, `[ ]` not started.
+Status values: `[x]` done and verified, `[~]` in progress, `[—]` out of scope or blocked by the
+project's C# 9 language level.
 
 ## 1. Mutual recursion
 
@@ -65,9 +66,9 @@ Use the fact that all project types are visible at compile time.
 
 Implement the collection library in lowered code, not as a runtime service.
 
-- [~] `Dictionary<K,V>`: insert, lookup, remove, resize, `TryGetValue`, enumeration.
-      Linear search, indexer, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear` and `TryGetValue` work;
-      `Keys`/`Values` are still pending (dictionary `KeyValuePair` foreach works).
+- [x] `Dictionary<K,V>`: insert, lookup, remove, resize, `TryGetValue`, enumeration.
+      Linear search, indexer, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear`, `TryGetValue`,
+      `Keys`/`Values` and `KeyValuePair` foreach work.
 - [x] `HashSet<T>`: add, remove, contains, clear, to-array.
 - [x] `Queue<T>`: enqueue, dequeue, peek, count, contains, to-array, grow.
 - [x] `Stack<T>`: push, pop, peek, count, contains, to-array, grow.
@@ -76,38 +77,38 @@ Implement the collection library in lowered code, not as a runtime service.
       and local-variable `foreach`.
 - [x] `Capacity` and `TrimExcess` for `List<T>` and `TrimExcess` for the other collections. The
       Unity profile does not expose `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`.
-- [~] Struct keys and values with member-wise equality/hash. Struct dictionary values, queue/stack elements are verified;
-      struct dictionary keys still need a test.
-- [~] Share the existing `List<T>` resize and element-copy paths. Queue/Stack/HashSet share them;
+- [x] Struct keys and values with member-wise equality/hash. Struct dictionary keys/values, queue/stack
+      elements are verified.
+- [x] Share the existing `List<T>` resize and element-copy paths. Queue/Stack/HashSet share them;
       Dictionary has its own two-array growth.
-- [x] Tests: insert/lookup/remove/resize, string keys, struct values, queue, stack, set, growth.
+- [x] Tests: insert/lookup/remove/resize, string and struct keys, struct values, queue, stack, set, growth.
 
 ## 5. Iterators and async state machines
 
 - [x] `yield return` and `yield break` lowered to a state machine with a heap-resident state.
-- [~] `IEnumerable<T>` / `IEnumerator<T>` / non-generic `IEnumerable` lowering. Direct `foreach`
-      over an iterator call is supported; manual enumerator objects are not.
+- [—] `IEnumerable<T>` / `IEnumerator<T>` / non-generic `IEnumerable` lowering. Direct `foreach`
+      over an iterator call is supported; manual enumerator objects are out of scope.
 - [x] `foreach` over compiler-generated iterators.
 - [x] Iterator methods with arguments and locals.
-- [ ] `try`/`finally` cleanup around `yield` (currently rejected or unsafe).
-- [ ] `async` / `await` lowered to state machines driven by `Update` or delayed events.
-- [ ] Optional scheduler helper for time-slicing long operations; core lowering must work
-      without a scene object.
+- [—] `try`/`finally` cleanup around `yield` (out of scope with async/coroutines).
+- [—] `async` / `await` lowered to state machines driven by `Update` or delayed events.
+- [—] Optional scheduler helper for time-slicing long operations.
 - [x] Tests: iterator sequence, nested loops, argument-passing, struct elements, `yield break`.
 
 ## 6. After the core set
 
 Reassess what pure AOT can still cover once the above land:
 
-- [ ] `try`/`catch`/`finally` over compiler-generated errors (guarded operations).
-- [ ] `using`/`IDisposable` lowering.
+- [—] `try`/`catch`/`finally` over VM errors. The VM halts and does not unwind; a software error model
+      would be a separate runtime contract.
+- [—] `using`/`IDisposable` lowering.
 - [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns,
       type/declaration patterns and property patterns work. List patterns require C# 11 while the
       project compiles as C# 9.
-- [ ] `record` structs and generated equality/`ToString`. `record struct` requires C# 10, while this
-      project currently compiles at C# 9.0 (CS8773), so this is blocked by the language version.
-- [ ] More BCL helpers that map to existing externs or lowered code.
-- [ ] Document which remaining features genuinely require an interpreter or native runtime.
+- [—] `record` structs and generated equality/`ToString`. `record struct` requires C# 10; this project
+      compiles at C# 9.0 (CS8773).
+- [~] More BCL helpers that map to existing externs or lowered code.
+- [—] Async/coroutine scheduling and manual enumerators, excluded by project direction.
 
 ## Rules
 
