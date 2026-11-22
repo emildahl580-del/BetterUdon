@@ -1,0 +1,10 @@
+* text=auto
+
+# Unity assets that must not be normalised
+*.png binary
+*.jpg binary
+*.dll binary
+*.zip binary
+*.asset binary
+*.unity binary
+*.prefab binary
