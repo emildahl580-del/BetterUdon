@@ -22,10 +22,10 @@
   for correct member-wise equality.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
-- An `Action`, `Action<T>` and `Func<..., TResult>` delegate subset: method groups on this behaviour
-  store method IDs and invoke synchronously through the generated switch. Multicast `+=`/`-=`,
-  multi-subscriber events and non-capturing lambdas are supported; capturing closures and
-  cross-behaviour targets remain pending.
+- An `Action`, `Action<T>` and `Func<..., TResult>` delegate subset: method groups and lambdas on
+  this or another behaviour store method IDs and invoke synchronously through the generated switch.
+  Multicast `+=`/`-=`, multi-subscriber events, capturing closures and cross-behaviour targets are
+  supported.
 - Virtual and interface indexers use the same closed-world type-marker dispatch as methods and
   properties.
 - Dictionary `KeyValuePair` foreach and `Keys`/`Values` foreach.

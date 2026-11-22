@@ -124,8 +124,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - **Iterators** — `yield return` and `yield break` lowered to a synchronous state machine for direct
   `foreach` over a local iterator method.
 - **Delegates and events** — `Action`, `Action<T>` and `Func<..., TResult>` method groups and
-  non-capturing lambdas with `+=`/`-=`, multicast invocation and multi-subscriber `event` fields on
-  the same behaviour.
+  lambdas (capturing or not) with `+=`/`-=`, multicast invocation, multi-subscriber `event` fields
+  and cross-behaviour targets.
 - `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
 - Local functions with captures; properties with explicit or expression-bodied accessors.
 - `?.`, `??=`, `is null` / `is not null`, `switch` with `when`, `for` / `while` / `do` / `foreach`.
@@ -184,9 +184,9 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 ## Not supported
 
 Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
-components, capturing lambdas / closures / cross-behaviour delegates, `try`/`catch`, `async`/`await`,
-manual `IEnumerator` objects, `yield` inside `try`/`finally`, and dictionary `Keys`/`Values` as
-values. These are tracked in `Documentation~/aot-expansion.md`.
+components, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects, `yield` inside
+`try`/`finally`, and dictionary `Keys`/`Values` as values. Capturing closures snapshot their values
+rather than sharing the original variable. These are tracked in `Documentation~/aot-expansion.md`.
 
 ## What's new
 

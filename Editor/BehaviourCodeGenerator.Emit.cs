@@ -235,6 +235,12 @@ namespace BetterUdon.Editor
 
         private Slot FindLocal(ISymbol symbol)
         {
+            foreach (Dictionary<ISymbol, Slot> captured in _capturedSlotMaps)
+            {
+                if (captured.TryGetValue(symbol, out Slot capturedSlot))
+                    return capturedSlot;
+            }
+
             for (int i = _scopes.Count - 1; i >= 0; i--)
             {
                 if (_scopes[i].TryGetValue(symbol, out Slot slot))

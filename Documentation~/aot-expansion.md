@@ -42,22 +42,22 @@ Use the fact that all project types are visible at compile time.
 - [x] Build a project-wide table of BetterUdon types, interfaces and overrides.
 - [x] Interface calls and `virtual`/`override`/`abstract` calls lowered to a type-tag switch
       that inlines each implementation against the receiver.
-- [~] Delegates and events represented as target + method ID + closure value; invocation
+- [x] Delegates and events represented as target + method ID + closure value; invocation
       dispatches synchronously when the target is known, otherwise through the generated table.
       `Action`, `Action<T>` and `Func<...,TReturn>` method groups, multicast `+=`/`-=`,
-      multi-subscriber events and non-capturing lambdas on this behaviour are working.
+      multi-subscriber events, non-capturing and capturing lambdas, and cross-behaviour targets work.
 - [x] Typed delegate parameters and return values (`Action<T>`, `Func<T,R>`).
-- [ ] Cross-behaviour delegate targets: synchronous inlining where possible; document the
-      asynchronous event boundary when it is not.
-- [~] Lambdas and closures. Non-capturing lambdas work; capturing lambdas are rejected.
+- [x] Cross-behaviour delegate targets.
+- [x] Lambdas and closures. Captured values are snapshotted at delegate creation and written back
+      after invocation.
 - [x] `is` / `as` / casts against known BetterUdon types and interfaces (BCL runtime type tests remain limited).
 - [x] Diagnostics for open-world or missing implementations.
 - [x] Virtual/interface properties.
 - [x] Virtual/interface indexers.
-- [~] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
+- [x] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
       get and set, virtual indexer, parameterless and typed Action/Func method groups, multicast and
-      events, null delegates, non-capturing lambdas, `is`/`as` on behaviour types.
-- [ ] Tests: struct implementation, null target, capturing lambda/closure, cross-behaviour delegate.
+      events, null delegates, non-capturing/capturing lambdas, cross-behaviour delegates and `is`/`as`.
+- [ ] Tests: struct implementation, null target.
 
 ## 4. Collections
 
