@@ -261,6 +261,167 @@ namespace BetterUdon.Editor
             return EmitLValue(expression);
         }
 
+        private readonly Dictionary<ILocalSymbol, KeyValueSlots> _dictionaryForeachValues =
+            new Dictionary<ILocalSymbol, KeyValueSlots>(SymbolEqualityComparer.Default);
+
+        private sealed class KeyValueSlots
+        {
+            public Slot Key;
+            public Slot Value;
+        }
+
+        private static bool TryGetKeyValuePairTypes(ITypeSymbol type, out ITypeSymbol keyType, out ITypeSymbol valueType)
+        {
+            keyType = null;
+            valueType = null;
+
+            if (!(type is INamedTypeSymbol named) || !named.IsGenericType || named.TypeArguments.Length != 2)
+                return false;
+
+            if (named.ConstructedFrom?.ToDisplayString() != "System.Collections.Generic.KeyValuePair<TKey, TValue>")
+                return false;
+
+            keyType = named.TypeArguments[0];
+            valueType = named.TypeArguments[1];
+            return true;
+        }
+
+        private bool TryEmitForEachDictionaryKeys(ForEachStatementSyntax forEachStatement)
+        {
+            if (!(forEachStatement.Expression is MemberAccessExpressionSyntax memberAccess))
+                return false;
+
+            IPropertySymbol property = GetSymbolInfo(memberAccess).Symbol as IPropertySymbol;
+            if (property == null || (property.Name != "Keys" && property.Name != "Values"))
+                return false;
+
+            ITypeSymbol dictionaryType = GetType(memberAccess.Expression);
+            if (!TryGetDictionaryTypes(dictionaryType, out ITypeSymbol keyType, out ITypeSymbol valueType))
+                return false;
+
+            bool keys = property.Name == "Keys";
+            ITypeSymbol elementType = keys ? keyType : valueType;
+            ITypeSymbol arrayType = MakeArrayType(elementType);
+
+            Slot dictionary = EmitExpression(memberAccess.Expression);
+            if (dictionary == null)
+                return false;
+
+            Slot items = keys ? DictionaryKeys(dictionary) : DictionaryValues(dictionary);
+            Slot count = DictionaryCount(dictionary);
+            ILocalSymbol elementSymbol = GetDeclaredSymbol(forEachStatement) as ILocalSymbol;
+            if (elementSymbol == null)
+                return false;
+
+            using (PushScope())
+            {
+                Slot element = DeclareLocal(elementSymbol, elementType, forEachStatement.Identifier.ValueText);
+                Slot index = NewSlot(_intType, "dictKeysIndex");
+                Copy(IntConstant(0), index);
+
+                string loopLabel = NewLabel("dictKeysLoop");
+                string incrementLabel = NewLabel("dictKeysInc");
+                string endLabel = NewLabel("dictKeysEnd");
+                _asm.MarkLabel(loopLabel);
+
+                Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, forEachStatement);
+                _asm.JumpIfFalse(inRange, endLabel);
+
+                ArrayElementLValue item = new ArrayElementLValue(this, items, index, arrayType, elementType);
+                Copy(item.Get(true), element);
+
+                _loops.Push(new LoopContext { BreakLabel = endLabel, ContinueLabel = incrementLabel });
+                EmitStatement(forEachStatement.Statement);
+                _loops.Pop();
+
+                _asm.MarkLabel(incrementLabel);
+                Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, forEachStatement), index);
+                _asm.Jump(loopLabel);
+                _asm.MarkLabel(endLabel);
+            }
+
+            return true;
+        }
+
+        private bool TryEmitForEachDictionary(ForEachStatementSyntax forEachStatement)
+        {
+            ITypeSymbol collectionType = GetType(forEachStatement.Expression);
+            if (!TryGetDictionaryTypes(collectionType, out ITypeSymbol keyType, out ITypeSymbol valueType))
+                return false;
+
+            ILocalSymbol elementSymbol = GetDeclaredSymbol(forEachStatement) as ILocalSymbol;
+            if (elementSymbol == null || !TryGetKeyValuePairTypes(elementSymbol.Type, out _, out _))
+                return false;
+
+            Slot dictionary = EmitExpression(forEachStatement.Expression);
+            if (dictionary == null)
+                return false;
+
+            Slot keys = DictionaryKeys(dictionary);
+            Slot values = DictionaryValues(dictionary);
+            Slot count = DictionaryCount(dictionary);
+            Slot index = NewSlot(_intType, "dictForEachIndex");
+
+            KeyValueSlots slots = new KeyValueSlots
+            {
+                Key = NewSlot(keyType, "dictKey"),
+                Value = NewSlot(valueType, "dictValue")
+            };
+
+            _dictionaryForeachValues[elementSymbol] = slots;
+
+            try
+            {
+                Copy(IntConstant(0), index);
+
+                string loopLabel = NewLabel("dictForEachLoop");
+                string incrementLabel = NewLabel("dictForEachInc");
+                string endLabel = NewLabel("dictForEachEnd");
+
+                _asm.MarkLabel(loopLabel);
+                Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, forEachStatement);
+                _asm.JumpIfFalse(inRange, endLabel);
+
+                ArrayElementLValue keyElement = new ArrayElementLValue(this, keys, index,
+                    MakeArrayType(keyType), keyType);
+                Copy(keyElement.Get(true), slots.Key);
+
+                ArrayElementLValue valueElement = new ArrayElementLValue(this, values, index,
+                    MakeArrayType(valueType), valueType);
+                Copy(valueElement.Get(true), slots.Value);
+
+                _loops.Push(new LoopContext { BreakLabel = endLabel, ContinueLabel = incrementLabel });
+                EmitStatement(forEachStatement.Statement);
+                _loops.Pop();
+
+                _asm.MarkLabel(incrementLabel);
+                Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, forEachStatement), index);
+                _asm.Jump(loopLabel);
+                _asm.MarkLabel(endLabel);
+            }
+            finally
+            {
+                _dictionaryForeachValues.Remove(elementSymbol);
+            }
+
+            return true;
+        }
+
+        private bool TryGetDictionaryPairValue(IPropertySymbol property, ExpressionSyntax receiver, out Slot value)
+        {
+            value = null;
+
+            if (property == null || (property.Name != "Key" && property.Name != "Value"))
+                return false;
+
+            ILocalSymbol local = GetSymbolInfo(receiver).Symbol as ILocalSymbol;
+            if (local == null || !_dictionaryForeachValues.TryGetValue(local, out KeyValueSlots slots))
+                return false;
+
+            value = property.Name == "Key" ? slots.Key : slots.Value;
+            return true;
+        }
+
         private bool TryEmitDictionaryMethod(IMethodSymbol method, InvocationExpressionSyntax invocation, out Slot result)
         {
             result = null;

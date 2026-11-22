@@ -245,6 +245,9 @@ namespace BetterUdon.Editor
             if (type.TypeKind == TypeKind.Interface || type.TypeKind == TypeKind.Class || type.TypeKind == TypeKind.TypeParameter)
                 return "SystemObject";
 
+            if (type.TypeKind == TypeKind.Delegate)
+                return "SystemObject";
+
             if (type is INamedTypeSymbol namedType && IsUserStruct(namedType))
                 return "SystemObject";
 

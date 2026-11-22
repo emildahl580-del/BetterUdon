@@ -281,6 +281,9 @@ namespace BetterUdon.Editor
 
             if (symbol is IPropertySymbol property)
             {
+                if (TryGetDictionaryPairValue(property, receiverSyntax, out Slot pairValue))
+                    return MaybeCloneStruct(pairValue);
+
                 if (property.IsIndexer)
                 {
                     AddError("Indexers are not supported, use an array or a field instead.", memberAccess);
@@ -642,6 +645,9 @@ namespace BetterUdon.Editor
 
             if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
             {
+                if (TryEmitDelegateAssignment(target, assignment.Right, assignment))
+                    return target.Get(true);
+
                 Slot value = EmitExpression(assignment.Right);
 
                 if (value == null)

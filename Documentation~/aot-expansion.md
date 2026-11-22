@@ -41,19 +41,21 @@ Use the fact that all project types are visible at compile time.
 - [x] Build a project-wide table of BetterUdon types, interfaces and overrides.
 - [x] Interface calls and `virtual`/`override`/`abstract` calls lowered to a type-tag switch
       that inlines each implementation against the receiver.
-- [ ] Delegates and events represented as target + method ID + closure value; invocation
+- [~] Delegates and events represented as target + method ID + closure value; invocation
       dispatches synchronously when the target is known, otherwise through the generated table.
-- [ ] Typed delegate parameters and return values.
+      Parameterless `System.Action` method groups on this behaviour are working.
+- [ ] Typed delegate parameters and return values (`Action<T>`, `Func<T,R>`).
 - [ ] Cross-behaviour delegate targets: synchronous inlining where possible; document the
       asynchronous event boundary when it is not.
+- [ ] Lambdas, closures, multi-subscriber events and `+=`/`-=`.
 - [ ] `is` / `as` / casts against known BetterUdon and user types.
 - [x] Diagnostics for open-world or missing implementations.
 - [x] Virtual/interface properties.
 - [ ] Virtual/interface indexers.
-- [x] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
-      get and set.
-- [ ] Tests: delegate with args/return, event with multiple subscribers, struct implementation,
-      null target, virtual indexer.
+- [~] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
+      get and set, parameterless Action method groups and null delegates.
+- [ ] Tests: typed delegate args/return, event with multiple subscribers, struct implementation,
+      null target, virtual indexer, lambda/closure.
 
 ## 4. Collections
 
@@ -61,11 +63,11 @@ Implement the collection library in lowered code, not as a runtime service.
 
 - [~] `Dictionary<K,V>`: insert, lookup, remove, resize, `TryGetValue`, enumeration.
       Linear search, indexer, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear` and `TryGetValue` work;
-      `Keys`/`Values` and dictionary `foreach` are still pending.
+      `Keys`/`Values` are still pending (dictionary `KeyValuePair` foreach works).
 - [x] `HashSet<T>`: add, remove, contains, clear, to-array.
 - [x] `Queue<T>`: enqueue, dequeue, peek, count, contains, to-array, grow.
 - [x] `Stack<T>`: push, pop, peek, count, contains, to-array, grow.
-- [ ] `KeyValuePair<K,V>` and dictionary `foreach`.
+- [x] `KeyValuePair<K,V>` and dictionary `foreach`.
 - [ ] `Capacity`, `TrimExcess`, constructors with comparer (where meaningful).
 - [~] Struct keys and values with member-wise equality/hash. Struct dictionary values, queue/stack elements are verified;
       struct dictionary keys still need a test.

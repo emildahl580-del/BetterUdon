@@ -309,8 +309,8 @@ The same compiler-owned collection approach covers the other common containers:
 
 Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
 use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
-keeps equality correct for primitives and user structs without a custom runtime. `Keys`/`Values`,
-`KeyValuePair` enumeration and dictionary `foreach` are still open in
+keeps equality correct for primitives and user structs without a custom runtime. Dictionary
+`KeyValuePair` enumeration works through `foreach`; `Keys`/`Values` are still open in
 `Documentation~/aot-expansion.md`.
 
 ---
@@ -412,6 +412,27 @@ public void Run()
 This is intentionally a **synchronous** lowering for direct `foreach` use, not a coroutine scheduler.
 Manual `GetEnumerator`/`MoveNext` objects, `yield` inside `try`/`finally`, and `async`/`await` are still
 open items.
+
+### Delegates
+
+A small delegate subset is available: parameterless `System.Action` values can be assigned method
+groups on the same behaviour and invoked synchronously.
+
+```csharp
+private Action callback;
+
+private void Ping() { hits++; }
+
+public void Run()
+{
+    callback = Ping;
+    callback();       // inlines Ping
+}
+```
+
+The delegate slot stores a method ID (0 means null); invocation switches on the ID and inlines the
+target. Lambdas, closures, typed delegates (`Action<T>`, `Func<T,R>`), events with `+=`/`-=` and
+cross-behaviour delegate targets are still open.
 
 ### Across behaviours
 
@@ -726,6 +747,8 @@ Some limits remain:
   created in `Start`.
 - **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
   enumerators and `async`/`await` are not implemented yet.
+- **Delegate limits.** Only parameterless `System.Action` method groups on the same behaviour are
+  supported. Typed delegates, lambdas, closures, events and cross-behaviour targets are pending.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**
   `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
   backings and collection fields are real heap variables but are not Unity-serialisable, so they start

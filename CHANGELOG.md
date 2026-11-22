@@ -15,10 +15,14 @@
   type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
   Virtual and interface properties use the same dispatch for getters and setters.
 - `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` intrinsics, including growth, struct
-  elements/values, string keys and `TryGetValue`. Dictionary uses linear search for correct
-  member-wise equality.
+  elements/values, string keys, `TryGetValue` and `KeyValuePair` foreach. Dictionary uses linear search
+  for correct member-wise equality.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
+- A parameterless `System.Action` delegate subset: method groups on this behaviour store a method ID
+  and invoke synchronously through the generated switch. Lambdas, events and typed delegates remain
+  pending.
+- Dictionary `KeyValuePair` foreach and `Keys`/`Values` foreach.
 
 ## 1.6.1
 

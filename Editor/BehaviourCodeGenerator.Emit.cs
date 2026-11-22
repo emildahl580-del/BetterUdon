@@ -705,6 +705,10 @@ namespace BetterUdon.Editor
                 // reset to their default value every time the declaration is executed.
                 EmitDefaultValue(slot, type);
 
+                if (declarator.Initializer != null &&
+                    TryEmitDelegateLocalInitializer(slot, type, declarator.Initializer.Value, declarator))
+                    continue;
+
                 if (declarator.Initializer != null)
                 {
                     Slot value = EmitExpression(declarator.Initializer.Value);
@@ -832,6 +836,12 @@ namespace BetterUdon.Editor
         private void EmitForEach(ForEachStatementSyntax forEachStatement)
         {
             if (TryEmitForEachIterator(forEachStatement))
+                return;
+
+            if (TryEmitForEachDictionaryKeys(forEachStatement))
+                return;
+
+            if (TryEmitForEachDictionary(forEachStatement))
                 return;
 
             ITypeSymbol collectionType = GetType(forEachStatement.Expression);
