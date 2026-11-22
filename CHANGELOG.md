@@ -16,7 +16,8 @@
   type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
   Virtual and interface properties/indexers use the same dispatch for getters and setters. `is`/`as`
   against known behaviour types use the marker table.
-- Switch expressions with constant, relational, `when` and discard patterns.
+- Switch expressions with constant, relational, `when` and discard patterns, plus type and
+  declaration patterns in `is` expressions.
 - `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` intrinsics, including growth, struct
   elements/values, string keys, `TryGetValue` and `KeyValuePair` foreach. Dictionary uses linear search
   for correct member-wise equality.

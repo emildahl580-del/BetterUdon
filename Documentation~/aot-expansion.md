@@ -97,7 +97,7 @@ Reassess what pure AOT can still cover once the above land:
 - [ ] `try`/`catch`/`finally` over compiler-generated errors (guarded operations).
 - [ ] `using`/`IDisposable` lowering.
 - [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns
-      work; property, list and type patterns are still pending.
+      and type/declaration patterns work; property and list patterns are still pending.
 - [ ] `record` structs and generated equality/`ToString`.
 - [ ] More BCL helpers that map to existing externs or lowered code.
 - [ ] Document which remaining features genuinely require an interpreter or native runtime.

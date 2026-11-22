@@ -1046,8 +1046,51 @@ namespace BetterUdon.Editor
                 return result;
             }
 
-            AddError("Only 'is null' and 'is not null' patterns are supported by the BetterUdon compiler.", isPattern);
+            if (pattern is TypePatternSyntax typePattern)
+            {
+                ITypeSymbol targetType = Substitute(GetTypeInfo(typePattern.Type).Type);
+                Slot test = EmitTypeTest(isPattern.Expression, targetType, isPattern, false);
+                return negate ? EmitLogicalNot(test) : test;
+            }
+
+            if (pattern is DeclarationPatternSyntax declarationPattern)
+            {
+                ITypeSymbol targetType = Substitute(GetTypeInfo(declarationPattern.Type).Type);
+                Slot test = EmitTypeTest(isPattern.Expression, targetType, isPattern, false);
+                Slot result = test;
+
+                if (declarationPattern.Designation is SingleVariableDesignationSyntax designation)
+                {
+                    ILocalSymbol local = GetDeclaredSymbol(designation) as ILocalSymbol;
+                    if (local != null)
+                    {
+                        Slot localSlot = DeclareLocal(local, targetType, local.Name);
+                        EmitDefaultValue(localSlot, targetType);
+
+                        string skipLabel = NewLabel("patternSkip");
+                        _asm.JumpIfFalse(test, skipLabel);
+                        Slot value = EmitExpression(isPattern.Expression);
+                        if (value != null)
+                            Copy(ConvertTo(value, targetType), localSlot);
+                        _asm.MarkLabel(skipLabel);
+                    }
+                }
+
+                return negate ? EmitLogicalNot(result) : result;
+            }
+
+            AddError("Only 'is null', 'is not null', type and declaration patterns are supported by the BetterUdon compiler.", isPattern);
             return NewSlot(_boolType, "bad");
+        }
+
+        private Slot EmitLogicalNot(Slot value)
+        {
+            string signature = UdonExternSignatures.BuiltinOperator(_boolType, "op_LogicalNot", _boolType, _boolType, true);
+            Slot result = NewSlot(_boolType, "not");
+            _asm.Push(value);
+            _asm.Push(result);
+            Extern(signature, "logical not");
+            return result;
         }
 
         private bool IsNullExpression(ExpressionSyntax expression)

@@ -342,12 +342,18 @@ namespace BetterUdon.Editor
         private Slot EmitTypeTest(BinaryExpressionSyntax binary, bool asExpression)
         {
             ITypeSymbol targetType = Substitute(GetTypeInfo(binary.Right).Type);
-            ITypeSymbol sourceType = GetType(binary.Left);
-            Slot value = EmitExpression(binary.Left);
+            return EmitTypeTest(binary.Left, targetType, binary, asExpression);
+        }
+
+        private Slot EmitTypeTest(ExpressionSyntax valueExpression, ITypeSymbol targetType, SyntaxNode node,
+            bool asExpression)
+        {
+            ITypeSymbol sourceType = GetType(valueExpression);
+            Slot value = EmitExpression(valueExpression);
 
             if (targetType == null)
             {
-                AddError($"Unable to resolve the type in '{binary}'.", binary);
+                AddError($"Unable to resolve the type of '{valueExpression}'.", node);
                 return asExpression ? NewSlot(_objectType, "bad") : NewSlot(_boolType, "bad");
             }
 
@@ -367,7 +373,7 @@ namespace BetterUdon.Editor
                     Copy(ConvertTo(value, targetType), result);
                 else
                     Copy(EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
-                        "op_Inequality", _boolType, binary), result);
+                        "op_Inequality", _boolType, node), result);
 
                 return result;
             }
@@ -376,7 +382,7 @@ namespace BetterUdon.Editor
             {
                 if (asExpression)
                 {
-                    AddError("'as' cannot be used with a struct type.", binary);
+                    AddError("\x27as\x27 cannot be used with a struct type.", node);
                     return result;
                 }
 
@@ -392,7 +398,7 @@ namespace BetterUdon.Editor
             {
                 if (asExpression && targetType.IsValueType)
                 {
-                    AddError("'as' cannot be used with a value type.", binary);
+                    AddError("\x27as\x27 cannot be used with a value type.", node);
                     return result;
                 }
 
@@ -406,7 +412,7 @@ namespace BetterUdon.Editor
             string endLabel = NewLabel("typeTestEnd");
             string notNull = NewLabel("typeTestNotNull");
             Slot isNull = EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
-                "op_Equality", _boolType, binary);
+                "op_Equality", _boolType, node);
             _asm.JumpIfFalse(isNull, notNull);
             _asm.Jump(endLabel);
             _asm.MarkLabel(notNull);
@@ -420,7 +426,7 @@ namespace BetterUdon.Editor
                     continue;
 
                 Slot expected = ConstantSlot(_stringType, candidate.ToDisplayString());
-                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, binary);
+                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, node);
                 string next = NewLabel("typeTestNext");
                 _asm.JumpIfFalse(matches, next);
 
