@@ -358,11 +358,33 @@ namespace BetterUdon.Editor
                     return false;
             }
 
-            Type systemType = UdonTypeSystem.ToSystemType(typeArgument);
+            Type systemType;
+            bool isBehaviour = DerivesFromBetterUdon(typeArgument);
+
+            if (isBehaviour)
+            {
+                // The C# component is removed from a built world. Looking the behaviour up by its own
+                // type would return null there, so the backing UdonBehaviour is resolved instead; that
+                // is the object that owns the variables.
+                if (method.Name != "GetComponent")
+                {
+                    AddError($"'{method.Name}<{typeArgument.Name}>' is not supported for BetterUdon behaviours. " +
+                             "Use GetComponent on the object itself, or keep a public UdonBehaviour reference.", invocation);
+                    result = NewSlot(method.ReturnType, "bad");
+                    return true;
+                }
+
+                systemType = typeof(VRC.Udon.UdonBehaviour);
+            }
+            else
+            {
+                systemType = UdonTypeSystem.ToSystemType(typeArgument);
+            }
 
             if (systemType == null)
             {
                 AddError($"Unable to resolve the component type '{typeArgument}'.", invocation);
+                result = NewSlot(method.ReturnType, "bad");
                 return true;
             }
 
@@ -377,6 +399,11 @@ namespace BetterUdon.Editor
             _asm.Push(typeSlot);
             _asm.Push(componentSlot);
             Extern(signature, $"'{method.Name}<{typeArgument.Name}>'");
+
+            // The lookup returns whichever UdonBehaviour is on the object, so a concrete behaviour type
+            // is verified against the type marker before it is handed back.
+            if (isBehaviour && typeArgument.ToDisplayString() != BetterUdonBaseTypeName)
+                EmitBehaviourTypeCheck(componentSlot, typeArgument, invocation);
 
             result = ConvertTo(componentSlot, method.ReturnType);
             return true;

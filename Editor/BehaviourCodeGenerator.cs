@@ -224,6 +224,10 @@ namespace BetterUdon.Editor
 
             _asm.AddSlot("__gameObject", "UnityEngineGameObject", null).InitialIsThis = true;
             _asm.AddSlot("__transform", "UnityEngineTransform", null).InitialIsThis = true;
+
+            // Lets GetComponent<T>() on another object check that the behaviour it found is really T.
+            Slot typeMarker = _asm.AddSlot(TypeMarkerSymbol, "SystemString", _stringType);
+            typeMarker.InitialValue = _behaviourType.ToDisplayString();
         }
 
         private void CreateFieldSlots()

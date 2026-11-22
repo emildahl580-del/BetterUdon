@@ -62,7 +62,7 @@ BetterUdon is a Unity package. Install it from the git repository:
    To pin a release, append the tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v1.1.0
+   https://github.com/emildahl580-del/BetterUdon.git#v1.2.0
    ```
 
 Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
@@ -72,7 +72,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-1.1.0.zip` from the
+- **Zip** — grab `BetterUdon-1.2.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 
@@ -103,6 +103,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - `?.`, `??=`, `is null` / `is not null`, `switch` with `when`, `for` / `while` / `do` / `foreach`.
 - `typeof(T)`, `GetComponent<T>()` and friends.
 - Cross-behaviour `SendCustomEvent` and `Get`/`SetProgramVariable`.
+- **Cross-behaviour fields** — `GetComponent<Other>()` (or an inspector reference) then `other.value`
+  reads and writes the other behaviour's public variables, with structs copied by value.
 - **Network sync** — `[BetterUdonSynced]` on fields, including user structs and struct arrays (the
   compiler generates the synced mirrors and the serialisation entry points).
 

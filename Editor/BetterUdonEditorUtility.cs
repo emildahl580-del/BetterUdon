@@ -299,6 +299,12 @@ namespace BetterUdon.Editor
             if (type == null)
                 return value;
 
+            // A reference to another BetterUdon behaviour is stored as its backing UdonBehaviour: the
+            // C# component is removed from a built world, the UdonBehaviour is what survives and owns
+            // the variables.
+            if (value is BetterUdonBehaviour behaviourReference)
+                return behaviourReference.udonBehaviour;
+
             // User enums live on the heap as their underlying integer.
             if (type.IsEnum && UdonTypeSystem.IsUserEnum(type))
             {

@@ -211,6 +211,19 @@ namespace BetterUdon.Editor
             ExpressionSyntax receiverSyntax = memberAccess.Expression;
             bool isStatic = symbol is IFieldSymbol f && f.IsStatic || symbol is IPropertySymbol p && p.IsStatic;
 
+            if (symbol == null)
+            {
+                // A private member of another behaviour has no symbol here, only a candidate; name the
+                // real problem instead of reporting an unsupported expression.
+                ISymbol candidate = GetSymbolInfo(memberAccess).CandidateSymbols.FirstOrDefault();
+
+                if (candidate is IFieldSymbol candidateField && DerivesFromBetterUdon(candidateField.ContainingType))
+                {
+                    AddError($"'{candidateField.Name}' is not accessible from another behaviour because it is not public.", memberAccess);
+                    return NewSlot(candidateField.Type, "bad");
+                }
+            }
+
             if (symbol is IFieldSymbol field)
             {
                 if (_fieldSlots.TryGetValue(field, out Slot fieldSlot) && IsBehaviourReceiver(receiverSyntax))
@@ -233,6 +246,11 @@ namespace BetterUdon.Editor
                     return MaybeCloneStruct(result);
                 }
 
+                // Fields of another BetterUdon behaviour live in that behaviour's own heap, so they are
+                // read through its public variables instead of an extern member access.
+                if (!isStatic && DerivesFromBetterUdon(field.ContainingType))
+                    return EmitReadBehaviourField(EmitExpression(receiverSyntax), field, memberAccess);
+
                 Slot instance = isStatic ? null : EmitExpression(receiverSyntax);
                 return ReadExternMember(instance, UdonExternSignatures.FieldGet(field), field.Type, memberAccess);
             }
@@ -248,6 +266,13 @@ namespace BetterUdon.Editor
                 // Auto properties declared on the behaviour itself compile to their backing field.
                 if (!property.IsStatic && TryGetBehaviourPropertySlot(property, out Slot propertySlot))
                     return MaybeCloneStruct(propertySlot);
+
+                if (!property.IsStatic && !IsBehaviourReceiver(receiverSyntax) && DerivesFromBetterUdon(property.ContainingType))
+                {
+                    AddError($"'{property.Name}' is a property of another behaviour. Only public variables are visible " +
+                             "across behaviours; store the value in a public field or raise a custom event.", memberAccess);
+                    return NewSlot(property.Type, "bad");
+                }
 
                 // List<T>.Count / .Capacity
                 if (TryGetListElementType(property.ContainingType, out ITypeSymbol listElementType))
@@ -1037,7 +1062,9 @@ namespace BetterUdon.Editor
 
                     if (symbol is IFieldSymbol field)
                     {
-                        if (_fieldSlots.TryGetValue(field, out Slot fieldSlot))
+                        // Only this behaviour's own instance maps to a heap slot; another instance of
+                        // the same type has its own heap.
+                        if (_fieldSlots.TryGetValue(field, out Slot fieldSlot) && IsBehaviourReceiver(memberAccess.Expression))
                         {
                             lvalue = new SlotLValue(this, fieldSlot);
                             return true;
@@ -1056,6 +1083,17 @@ namespace BetterUdon.Editor
                         }
 
                         bool isStatic = field.IsStatic;
+
+                        if (!isStatic && DerivesFromBetterUdon(field.ContainingType))
+                        {
+                            Slot receiver = EmitExpression(memberAccess.Expression);
+
+                            lvalue = new CallbackLValue(field.Type,
+                                clone => EmitReadBehaviourField(receiver, field, memberAccess, clone),
+                                value => EmitWriteBehaviourField(receiver, field, value, memberAccess));
+                            return true;
+                        }
+
                         Slot instance = isStatic ? null : EmitExpression(memberAccess.Expression);
                         lvalue = new ExternMemberLValue(this, instance,
                             UdonExternSignatures.FieldGet(field), UdonExternSignatures.FieldSet(field), field.Type);
@@ -1064,10 +1102,19 @@ namespace BetterUdon.Editor
 
                     if (symbol is IPropertySymbol property)
                     {
-                        if (!property.IsStatic && TryGetBehaviourPropertySlot(property, out Slot propertySlot))
+                        if (!property.IsStatic && IsBehaviourReceiver(memberAccess.Expression) &&
+                            TryGetBehaviourPropertySlot(property, out Slot propertySlot))
                         {
                             lvalue = new SlotLValue(this, propertySlot);
                             return true;
+                        }
+
+                        if (!property.IsStatic && !IsBehaviourReceiver(memberAccess.Expression) &&
+                            DerivesFromBetterUdon(property.ContainingType))
+                        {
+                            AddError($"'{property.Name}' is a property of another behaviour. Only public variables are " +
+                                     "writable across behaviours; use a public field or raise a custom event.", memberAccess);
+                            return false;
                         }
 
                         // Properties with their own accessor bodies are inlined on get and set.

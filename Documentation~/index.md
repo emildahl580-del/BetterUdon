@@ -316,6 +316,42 @@ and a copy never aliases the element.
 | Extern enums (`KeyCode`, `Space`, ...) | keep their real Udon enum type; the registry exposes no operators for them, so compare as `(int)` |
 | Extern struct initialisers | `new Color(...)`, `new Vector3(...)` are evaluated in the editor and baked as values |
 
+### Across behaviours
+
+Each program owns its heap, so another behaviour's variables are reached through the only door Udon
+provides: its public variable table. Field access is lowered to `GetProgramVariable` and
+`SetProgramVariable`, which keeps the C# shape:
+
+```csharp
+public class Door : BetterUdonBehaviour
+{
+    public Lever lever;              // drag the Lever component in the inspector
+
+    public void Open()
+    {
+        if (!lever.pulled)
+            return;
+
+        lever.uses = lever.uses + 1; // reads and writes the Lever's public variable
+    }
+}
+```
+
+- **Only public variables are visible.** A private field, a `List<T>`, an auto property or a
+  `[BetterUdonNoExport]` field is a compile error that names the field.
+- **Value semantics are kept.** Reading a struct field copies it (the receiver's value cannot be
+  mutated through the copy) and writing a struct stores a copy.
+- **References survive a build.** A public field typed as a BetterUdon behaviour is stored as that
+  behaviour's backing `UdonBehaviour`, because the C# component is removed from a built world.
+- **`GameObject.GetComponent<T>()` works** for BetterUdon behaviours: the lookup is done on the
+  backing `UdonBehaviour` and then verified against a hidden type marker, so a different behaviour on
+  that object yields `null`, exactly like `GetComponent` should.
+- **`GetComponent`/`GetComponentInChildren`/`GetComponentInParent` on `this`** cannot find another
+  behaviour (a GameObject hosts one BetterUdon behaviour), and the `InChildren`/`InParent` forms are
+  rejected for behaviour types because Udon cannot search by behaviour type.
+- **Properties and methods are not reachable.** There is no cross-program call: use a public field
+  for data and `SendCustomEvent` for behaviour.
+
 ---
 
 ## 7. Networking

@@ -678,7 +678,10 @@ namespace BetterUdon.Editor
                 if (declarator.Initializer != null)
                 {
                     Slot value = EmitExpression(declarator.Initializer.Value);
-                    Copy(ConvertTo(value, type), slot);
+
+                    // An error path can produce no value; the diagnostic has already been reported.
+                    if (value != null)
+                        Copy(ConvertTo(value, type), slot);
                 }
             }
         }

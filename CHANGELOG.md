@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- Cross-behaviour field access. `other.value` on another BetterUdon behaviour reads and writes its
+  public variables through Udon's `GetProgramVariable`/`SetProgramVariable`, so no manual
+  `GetProgramVariable("value")` calls are needed. Structs are copied on read and write, keeping value
+  semantics. Fields must be public variables; anything else is a compile error naming the field.
+- `GameObject.GetComponent<T>()` for a BetterUdon behaviour resolves the backing `UdonBehaviour` and
+  verifies it against a hidden type marker, so the wrong behaviour yields `null` instead of the wrong
+  heap. `GetComponentInChildren`/`InParent` for behaviour types are rejected with guidance.
+- Public fields typed as a BetterUdon behaviour are stored as the backing `UdonBehaviour`, which is
+  what survives in a built world (the C# component is removed).
+
+### Fixed
+
+- `GetComponent<T>` / `GetComponentInChildren<T>` error paths returned no value, which crashed the
+  compiler with a `NullReferenceException` instead of reporting the diagnostic.
+- Assigning a field through another instance of the same behaviour wrote to `this`, because the
+  lvalue path ignored the receiver.
+- A struct field's heap default was declared as an array type, which made Udon's serialiser lose the
+  symbol table when the stored program was read back. Object slots keep their symbol type now.
+
 ## 1.1.0
 
 ### Added

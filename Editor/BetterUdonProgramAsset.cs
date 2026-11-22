@@ -171,6 +171,12 @@ namespace BetterUdon.Editor
                 uint address = program.SymbolTable.GetAddressFromSymbol(pair.Key);
                 Type valueType = UdonTypeSystem.GetHeapType(pair.Value);
 
+                // Struct defaults are object[] values in a SystemObject slot. Declaring the heap
+                // variable as an array type instead makes Udon's serialiser lose the symbol table when
+                // the program is read back, so such slots keep the type the symbol already declares.
+                if (pair.Value is Array && program.SymbolTable.GetSymbolType(pair.Key) == typeof(object))
+                    valueType = typeof(object);
+
                 try
                 {
                     program.Heap.SetHeapVariable(address, pair.Value, valueType ?? typeof(object));
