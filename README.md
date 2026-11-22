@@ -109,6 +109,10 @@ context menu, or change the tag in `Packages/manifest.json` to move to a specifi
 3. Press **Recompile**, or `Tools > BetterUdon > Compile All Programs`.
 4. Press Play — ClientSim runs the generated program.
 
+The **Program** box shows a complexity bar (green → red) for heap slots, instruction words and
+generic instantiations, so expensive generated programs are visible before they become a runtime or
+upload problem. The budgets are BetterUdon guidance, not hard Udon limits.
+
 `Tools > BetterUdon > Run Diagnostics` compiles every behaviour and writes the generated assembly,
 diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 

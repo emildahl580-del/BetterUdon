@@ -38,6 +38,8 @@ namespace BetterUdon.Editor
         public List<string> EntryPoints = new List<string>();
         public List<BetterUdonStructTypeInfo> StructTypes = new List<BetterUdonStructTypeInfo>();
         public uint HeapSize;
+        public int SlotCount;
+        public int GenericInstantiationCount;
 
         /// <summary>Metadata for <c>[NetworkCallable]</c> entry points, stored with the program.</summary>
         public VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[] NetworkMetadata;
@@ -203,6 +205,8 @@ namespace BetterUdon.Editor
             result.Diagnostics.AddRange(generator.Diagnostics);
             result.HeapInitialValues = generator.ComputeHeapInitialValues();
             result.HeapSize = generator.HeapSize;
+            result.SlotCount = generator.SlotCount;
+            result.GenericInstantiationCount = generator.GenericInstantiationCount;
             result.EntryPoints.AddRange(generator.ExportedEntryPoints);
             result.HasSyncedVariables = generator.HasSyncedVariables;
             result.SyncNeedsContinuous = generator.SyncNeedsContinuous;

@@ -697,7 +697,7 @@ namespace BetterUdon.Editor
             {
                 _genericInstantiations.Add(method);
 
-                if (_genericInstantiations.Count > 256 && !_genericExplosionReported)
+                if (_genericInstantiations.Count > BetterUdonComplexity.GenericBudget && !_genericExplosionReported)
                 {
                     _genericExplosionReported = true;
                     AddError($"This behaviour contains more than {_genericInstantiations.Count} generic " +

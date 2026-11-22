@@ -143,6 +143,8 @@ namespace BetterUdon.Editor
             {
                 BetterUdonInspectorGUI.SectionTitle("Program");
 
+                BetterUdonComplexity.Draw(programAsset);
+
                 _showAssembly = EditorGUILayout.Foldout(_showAssembly, "Assembly", true);
                 if (_showAssembly)
                     BetterUdonInspectorGUI.CodeBlock(programAsset.GetAssembly(), ref _assemblyScroll);

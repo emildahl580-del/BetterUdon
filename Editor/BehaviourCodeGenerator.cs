@@ -206,7 +206,7 @@ namespace BetterUdon.Editor
             foreach (KeyValuePair<ISymbol, Slot> pair in _fieldSlots)
                 RegisterStructLayouts(pair.Key is IFieldSymbol field ? field.Type : null);
 
-            if (_asm.Slots.Count > 20000)
+            if (_asm.Slots.Count > BetterUdonComplexity.SlotBudget)
             {
                 AddError($"This program generated {_asm.Slots.Count} heap slots. Generic or method " +
                          "inlining has grown too large for Udon; reduce instantiation breadth or split " +
@@ -252,6 +252,10 @@ namespace BetterUdon.Editor
         }
 
         public IReadOnlyList<Slot> Slots => _asm.Slots;
+
+        public int SlotCount => _asm.Slots.Count;
+
+        public int GenericInstantiationCount => _genericInstantiations.Count;
 
         /// <summary>
         /// Heap size the assembler needs: one slot per declared symbol plus one per unique extern.

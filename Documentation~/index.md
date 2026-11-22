@@ -724,6 +724,12 @@ round trip turns that into a compile error that names the asset.
 `Library/BetterUdonReport.txt` containing the generated assembly, diagnostics, entry points and
 assembled symbol table.
 
+The component inspector also shows a **complexity bar** under the generated program. It fills from
+green through yellow/orange to red as the program approaches BetterUdon's own budgets: 20,000 heap
+slots, 50,000 instruction words and 256 generic instantiations. These are guidance budgets, not hard
+Udon limits; the tooltip/details show the raw counts so a program can be judged without opening the
+assembly.
+
 BetterUdon is developed against an executable specification: the reference project contains behaviour
 suites for language features, structs, networking, cross-behaviour calls and recursion, run inside the
 editor against the real VM. The language and struct suites alone assert 60+ properties.

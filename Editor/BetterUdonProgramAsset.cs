@@ -40,6 +40,12 @@ namespace BetterUdon.Editor
         [SerializeField, HideInInspector]
         private bool syncNeedsContinuous;
 
+        [SerializeField, HideInInspector]
+        private int lastSlotCount;
+
+        [SerializeField, HideInInspector]
+        private int lastGenericInstantiationCount;
+
         // 0 Any, 1 None, 2 NoVariableSync, 3 Continuous, 4 Manual (BetterUdonBehaviourSyncMode).
         [SerializeField, HideInInspector]
         private int syncModeOverride;
@@ -59,6 +65,43 @@ namespace BetterUdon.Editor
         public IReadOnlyList<CompileDiagnostic> LastDiagnostics => _lastDiagnostics;
         public IReadOnlyList<BetterUdonStructTypeInfo> StructTypes => structTypes;
         public string ClassName => className;
+
+        public int SlotCount => lastSlotCount > 0 ? lastSlotCount : ProgramSymbolCount;
+
+        public int GenericInstantiationCount => lastGenericInstantiationCount;
+
+        public int InstructionWordCount
+        {
+            get
+            {
+                try
+                {
+                    return program?.ByteCode != null ? program.ByteCode.Length / 4 : 0;
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
+
+        public int ProgramSymbolCount
+        {
+            get
+            {
+                try
+                {
+                    if (program?.SymbolTable == null)
+                        return 0;
+
+                    return program.SymbolTable.GetSymbols().Length;
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
 
         /// <summary>True when the program declares at least one synced variable.</summary>
         public bool HasSyncedVariables => hasSyncedVariables;
@@ -115,6 +158,12 @@ namespace BetterUdon.Editor
 
             className = result.ClassName;
             _lastDiagnostics = result.Diagnostics;
+
+            if (result.Success)
+            {
+                lastSlotCount = result.SlotCount;
+                lastGenericInstantiationCount = result.GenericInstantiationCount;
+            }
 
             if (result.Success)
             {

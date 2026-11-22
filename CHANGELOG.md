@@ -24,7 +24,8 @@
   elements/values, string keys, `TryGetValue`, `KeyValuePair` foreach, stored `Keys`/`Values`
   collections and `TrimExcess`. `List<T>.Capacity` is settable.
 - Generic/code-size guard: programs over 20,000 heap slots or 256 generic instantiations fail with a
-  clear diagnostic instead of silently producing an oversized program.
+  clear diagnostic instead of silently producing an oversized program. The component inspector shows
+  a green-to-red complexity bar for the same budgets plus instruction words.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
 - An `Action`, `Action<T>` and `Func<..., TResult>` delegate subset: method groups and lambdas on
