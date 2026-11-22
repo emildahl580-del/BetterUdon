@@ -115,7 +115,7 @@ namespace BetterUdon.Editor
 
         private bool NeedsClosedWorldPropertyDispatch(IPropertySymbol property, ExpressionSyntax receiver)
         {
-            if (property == null || property.IsStatic || property.IsIndexer ||
+            if (property == null || property.IsStatic ||
                 !(property.ContainingType is INamedTypeSymbol containing))
                 return false;
 
@@ -136,7 +136,8 @@ namespace BetterUdon.Editor
                    !UdonTypeSystem.IsExternAssembly(property.ContainingAssembly);
         }
 
-        private Slot EmitClosedWorldPropertyGet(IPropertySymbol property, Slot receiver, SyntaxNode node)
+        private Slot EmitClosedWorldPropertyGet(IPropertySymbol property, Slot receiver, SyntaxNode node,
+            IReadOnlyList<Slot> indexArguments = null)
         {
             List<PropertyDispatchTarget> targets = GetPropertyDispatchTargets(property);
 
@@ -177,7 +178,8 @@ namespace BetterUdon.Editor
                 else if (target.Property.GetMethod != null &&
                          target.Property.GetMethod.DeclaringSyntaxReferences.Length > 0)
                 {
-                    value = InlineRemoteMethod(target.Property.GetMethod, receiver, new List<Slot>(), node);
+                    value = InlineRemoteMethod(target.Property.GetMethod, receiver,
+                        indexArguments != null ? new List<Slot>(indexArguments) : new List<Slot>(), node);
                 }
                 else if (target.Property.GetMethod != null)
                 {
@@ -195,7 +197,8 @@ namespace BetterUdon.Editor
             return result;
         }
 
-        private void EmitClosedWorldPropertySet(IPropertySymbol property, Slot receiver, Slot value, SyntaxNode node)
+        private void EmitClosedWorldPropertySet(IPropertySymbol property, Slot receiver, Slot value, SyntaxNode node,
+            IReadOnlyList<Slot> indexArguments = null)
         {
             List<PropertyDispatchTarget> targets = GetPropertyDispatchTargets(property);
 
@@ -233,7 +236,12 @@ namespace BetterUdon.Editor
                 else if (target.Property.SetMethod != null &&
                          target.Property.SetMethod.DeclaringSyntaxReferences.Length > 0)
                 {
-                    InlineRemoteMethod(target.Property.SetMethod, receiver, new List<Slot> { value }, node);
+                    List<Slot> setterArguments = new List<Slot>();
+                    if (indexArguments != null)
+                        setterArguments.AddRange(indexArguments);
+                    setterArguments.Add(value);
+
+                    InlineRemoteMethod(target.Property.SetMethod, receiver, setterArguments, node);
                 }
                 else if (target.Property.SetMethod != null)
                 {
@@ -310,7 +318,21 @@ namespace BetterUdon.Editor
 
                     if (SymbolEqualityComparer.Default.Equals(candidate.Type, property.Type) &&
                         candidate.Parameters.Length == property.Parameters.Length)
-                        return candidate;
+                    {
+                        bool sameParameters = true;
+                        for (int i = 0; i < candidate.Parameters.Length; i++)
+                        {
+                            if (!SymbolEqualityComparer.Default.Equals(candidate.Parameters[i].Type,
+                                    property.Parameters[i].Type))
+                            {
+                                sameParameters = false;
+                                break;
+                            }
+                        }
+
+                        if (sameParameters)
+                            return candidate;
+                    }
                 }
             }
 

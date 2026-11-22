@@ -430,9 +430,10 @@ public void Run()
 }
 ```
 
-The delegate slot stores a method ID (0 means null); invocation switches on the ID and inlines the
-target with the exact parameter and return types. Lambdas, closures, events with `+=`/`-=` and
-cross-behaviour delegate targets are still open.
+The delegate slot stores an array of method IDs (empty/null means no subscribers); invocation loops
+over the IDs and inlines each target with the exact parameter and return types. `+=` and `-=` add or
+remove subscribers, so `event` fields and multicast delegates work. Non-capturing lambdas are accepted
+as targets; capturing lambdas and cross-behaviour delegate targets are still open.
 
 ### Across behaviours
 
@@ -747,9 +748,9 @@ Some limits remain:
   created in `Start`.
 - **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
   enumerators and `async`/`await` are not implemented yet.
-- **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups on the same
-  behaviour are supported. Lambdas, closures, events, multi-subscriber lists and cross-behaviour
-  targets are pending.
+- **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups, non-capturing
+  lambdas, multicast `+=`/`-=` and multi-subscriber events on the same behaviour are supported.
+  Capturing lambdas/closures and cross-behaviour targets are pending.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**
   `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
   backings and collection fields are real heap variables but are not Unity-serialisable, so they start

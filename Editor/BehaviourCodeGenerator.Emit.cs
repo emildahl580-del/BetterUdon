@@ -573,6 +573,20 @@ namespace BetterUdon.Editor
             {
                 expressionBody = propertyDeclaration.ExpressionBody?.Expression;
             }
+            else if (node is ParenthesizedLambdaExpressionSyntax parenthesizedLambda)
+            {
+                body = parenthesizedLambda.Block;
+                expressionBody = parenthesizedLambda.ExpressionBody;
+            }
+            else if (node is SimpleLambdaExpressionSyntax simpleLambda)
+            {
+                body = simpleLambda.Block;
+                expressionBody = simpleLambda.ExpressionBody;
+            }
+            else if (node is AnonymousMethodExpressionSyntax anonymousMethod)
+            {
+                body = anonymousMethod.Block;
+            }
 
             if (body == null)
             {

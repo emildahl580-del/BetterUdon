@@ -107,6 +107,7 @@ namespace BetterUdon.Editor
         {
             CreateRootSlots();
             CreateFieldSlots();
+            CreateEventSlots();
             ReadSyncModeOverride();
             ValidateSyncModeOverride();
 

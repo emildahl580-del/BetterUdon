@@ -168,6 +168,9 @@ namespace BetterUdon.Editor
                 return NewSlot(GetType(identifier) ?? _objectType, "bad");
             }
 
+            if (symbol is IEventSymbol eventSymbol && _fieldSlots.TryGetValue(eventSymbol, out Slot eventSlot))
+                return eventSlot;
+
             if (symbol is IFieldSymbol field)
             {
                 // Inside an inlined body 'this' is the other behaviour, so its fields live in its heap.
@@ -242,6 +245,10 @@ namespace BetterUdon.Editor
                     return NewSlot(candidateField.Type, "bad");
                 }
             }
+
+            if (symbol is IEventSymbol eventSymbol && IsBehaviourReceiver(receiverSyntax) &&
+                _fieldSlots.TryGetValue(eventSymbol, out Slot eventSlot))
+                return eventSlot;
 
             if (symbol is IFieldSymbol field)
             {
@@ -660,6 +667,14 @@ namespace BetterUdon.Editor
                 return target.Get(true);
             }
 
+            if (assignment.IsKind(SyntaxKind.AddAssignmentExpression) &&
+                TryEmitDelegateAdd(target, assignment.Right, true, assignment))
+                return target.Get(true);
+
+            if (assignment.IsKind(SyntaxKind.SubtractAssignmentExpression) &&
+                TryEmitDelegateAdd(target, assignment.Right, false, assignment))
+                return target.Get(true);
+
             if (assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression))
             {
                 // a ??= b  ->  if (a == null) a = b
@@ -1027,6 +1042,12 @@ namespace BetterUdon.Editor
                         return true;
                     }
 
+                    if (symbol is IEventSymbol eventSymbol && _fieldSlots.TryGetValue(eventSymbol, out Slot eventSlot))
+                    {
+                        lvalue = new SlotLValue(this, eventSlot);
+                        return true;
+                    }
+
                     if (symbol is IFieldSymbol remoteField && IsRemoteMemberOf(remoteField))
                     {
                         IFieldSymbol captured = remoteField;
@@ -1116,6 +1137,23 @@ namespace BetterUdon.Editor
                 {
                     ITypeSymbol containerType = GetType(elementAccess.Expression);
 
+                    IPropertySymbol indexerProperty = GetSymbolInfo(elementAccess).Symbol as IPropertySymbol;
+                    if (indexerProperty != null && indexerProperty.IsIndexer &&
+                        NeedsClosedWorldPropertyDispatch(indexerProperty, elementAccess.Expression))
+                    {
+                        Slot indexerReceiver = EmitExpression(elementAccess.Expression);
+                        List<Slot> indexerArguments = elementAccess.ArgumentList.Arguments
+                            .Select(argument => EmitExpression(argument.Expression))
+                            .ToList();
+
+                        lvalue = new CallbackLValue(indexerProperty.Type,
+                            clone => EmitClosedWorldPropertyGet(indexerProperty, indexerReceiver,
+                                elementAccess, indexerArguments),
+                            value => EmitClosedWorldPropertySet(indexerProperty, indexerReceiver, value,
+                                elementAccess, indexerArguments));
+                        return true;
+                    }
+
                     if (TryGetListElementType(containerType, out ITypeSymbol listElementType))
                     {
                         Slot listSlot = EmitExpression(elementAccess.Expression);
@@ -1151,6 +1189,13 @@ namespace BetterUdon.Editor
                 case MemberAccessExpressionSyntax memberAccess:
                 {
                     ISymbol symbol = GetSymbolInfo(memberAccess).Symbol;
+
+                    if (symbol is IEventSymbol memberEvent && IsBehaviourReceiver(memberAccess.Expression) &&
+                        _fieldSlots.TryGetValue(memberEvent, out Slot memberEventSlot))
+                    {
+                        lvalue = new SlotLValue(this, memberEventSlot);
+                        return true;
+                    }
 
                     if (symbol is IFieldSymbol field)
                     {
