@@ -129,6 +129,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
 - Local functions with captures; properties with explicit or expression-bodied accessors.
 - `?.`, `??=`, `is null` / `is not null`, `switch` with `when`, `for` / `while` / `do` / `foreach`.
+- `is` type/declaration/property patterns and switch expressions with constant, relational, `when`
+  and discard arms.
 - `typeof(T)`, `GetComponent<T>()` and friends.
 - Cross-behaviour `SendCustomEvent` and `Get`/`SetProgramVariable`.
 - **Cross-behaviour fields** — `GetComponent<Other>()` (or an inspector reference) then `other.value`
@@ -152,8 +154,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   and properties; each implementation is inlined with the receiver bound, so calls are synchronous.
   `is`/`as` against known behaviour types use the same marker.
 - **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
-  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T`, nested generic calls and numeric
-  `IComparable<T>.CompareTo` constraints.
+  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T`, nested generic calls and
+  `IComparable<T>.CompareTo` for numeric and user-struct types.
 - **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
 
 ### UdonSharp compatibility

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -19,8 +20,34 @@ namespace BetterUdon.Editor
                 return false;
 
             ITypeSymbol type = instance.Type;
-            if (type == null || !IsNumericType(type))
+            if (type == null)
                 return false;
+
+            if (!IsNumericType(type))
+            {
+                if (type is INamedTypeSymbol named && UdonTypeSystem.IsUserStruct(type))
+                {
+                    foreach (INamedTypeSymbol interfaceType in named.AllInterfaces)
+                    {
+                        if (interfaceType.ConstructedFrom?.ToDisplayString() != "System.IComparable<T>")
+                            continue;
+
+                        IMethodSymbol interfaceMethod = interfaceType.GetMembers("CompareTo")
+                            .OfType<IMethodSymbol>().FirstOrDefault();
+                        IMethodSymbol implementation = interfaceMethod != null
+                            ? named.FindImplementationForInterfaceMember(interfaceMethod) as IMethodSymbol
+                            : null;
+
+                        if (implementation != null && implementation.DeclaringSyntaxReferences.Length > 0)
+                        {
+                            result = InlineMethod(implementation, instance, arguments, node);
+                            return result != null;
+                        }
+                    }
+                }
+
+                return false;
+            }
 
             result = NewSlot(_intType, "compare");
             Copy(IntConstant(0), result);

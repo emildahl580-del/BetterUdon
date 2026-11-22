@@ -27,8 +27,9 @@ Make generic code compile once per concrete instantiation.
 - [x] `default(T)`, `new T()`, `typeof(T)`, `T[]`, `List<T>` and `ref`/`out T` inside generic bodies.
 - [x] Generic structs: layout and field access per `Struct<T>` instantiation.
 - [x] Generic constraints that only need type substitution (`where T : struct`, `class`, `new()`).
-- [~] Constraints that require interface member calls. Numeric `IComparable<T>.CompareTo` is lowered
-      directly; other constrained interface calls are still pending.
+- [~] Constraints that require interface member calls. Numeric and user-struct
+      `IComparable<T>.CompareTo` are lowered/inlined; other constrained interface calls are still
+      pending.
 - [ ] Deduplication policy: share reference-type instantiations where the representation is
       already `object`; specialise value-type instantiations.
 - [ ] Code-size guard and diagnostic for pathological instantiation counts.
@@ -96,8 +97,9 @@ Reassess what pure AOT can still cover once the above land:
 
 - [ ] `try`/`catch`/`finally` over compiler-generated errors (guarded operations).
 - [ ] `using`/`IDisposable` lowering.
-- [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns
-      and type/declaration patterns work; property and list patterns are still pending.
+- [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns,
+      type/declaration patterns and property patterns work. List patterns require C# 11 while the
+      project compiles as C# 9.
 - [ ] `record` structs and generated equality/`ToString`. `record struct` requires C# 10, while this
       project currently compiles at C# 9.0 (CS8773), so this is blocked by the language version.
 - [ ] More BCL helpers that map to existing externs or lowered code.

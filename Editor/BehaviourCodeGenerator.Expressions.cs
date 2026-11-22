@@ -1046,6 +1046,13 @@ namespace BetterUdon.Editor
                 return result;
             }
 
+            if (pattern is RecursivePatternSyntax recursivePattern &&
+                recursivePattern.PropertyPatternClause != null)
+            {
+                Slot result = EmitPropertyPattern(isPattern.Expression, recursivePattern, isPattern);
+                return negate ? EmitLogicalNot(result) : result;
+            }
+
             if (pattern is TypePatternSyntax typePattern)
             {
                 ITypeSymbol targetType = Substitute(GetTypeInfo(typePattern.Type).Type);
@@ -1081,6 +1088,195 @@ namespace BetterUdon.Editor
 
             AddError("Only 'is null', 'is not null', type and declaration patterns are supported by the BetterUdon compiler.", isPattern);
             return NewSlot(_boolType, "bad");
+        }
+
+        private Slot EmitPropertyPattern(ExpressionSyntax expression, RecursivePatternSyntax pattern, SyntaxNode node)
+        {
+            ITypeSymbol sourceType = GetType(expression);
+            Slot value = EmitExpression(expression);
+            return EmitPropertyPattern(value, sourceType, pattern, node);
+        }
+
+        private Slot EmitPropertyPattern(Slot value, ITypeSymbol sourceType, RecursivePatternSyntax pattern, SyntaxNode node)
+        {
+            Slot result = NewSlot(_boolType, "propertyPattern");
+            string falseLabel = NewLabel("propertyPatternFalse");
+            string endLabel = NewLabel("propertyPatternEnd");
+
+            if (pattern.Type != null)
+            {
+                ITypeSymbol type = Substitute(GetTypeInfo(pattern.Type).Type);
+                Slot typeTest = EmitTypeTest(value, sourceType, type, node);
+                _asm.JumpIfFalse(typeTest, falseLabel);
+            }
+
+            foreach (SubpatternSyntax subpattern in pattern.PropertyPatternClause.Subpatterns)
+            {
+                if (subpattern.NameColon == null)
+                {
+                    AddError("Only named property patterns are supported.", subpattern);
+                    continue;
+                }
+
+                string name = subpattern.NameColon.Name.Identifier.ValueText;
+                IPropertySymbol property = FindPatternProperty(sourceType, name);
+
+                if (property == null)
+                {
+                    AddError($"Unable to resolve property '{name}' in a property pattern.", subpattern);
+                    continue;
+                }
+
+                Slot propertyValue = EmitPropertyFromSlot(value, property, subpattern);
+                Slot match = EmitPatternMatch(propertyValue, subpattern.Pattern, subpattern);
+                _asm.JumpIfFalse(match, falseLabel);
+            }
+
+            Copy(ConstantSlot(_boolType, true), result);
+            _asm.Jump(endLabel);
+            _asm.MarkLabel(falseLabel);
+            Copy(ConstantSlot(_boolType, false), result);
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
+        private Slot EmitPatternMatch(Slot value, PatternSyntax pattern, SyntaxNode node)
+        {
+            if (pattern is DiscardPatternSyntax)
+                return ConstantSlot(_boolType, true);
+
+            if (pattern is ConstantPatternSyntax constantPattern)
+            {
+                ITypeSymbol type = value.Type ?? _objectType;
+                return EmitBinaryOperator(value, EmitExpression(constantPattern.Expression), type,
+                    "op_Equality", _boolType, node);
+            }
+
+            if (pattern is RelationalPatternSyntax relationalPattern)
+            {
+                ITypeSymbol type = value.Type ?? _objectType;
+                return EmitBinaryOperator(value, EmitExpression(relationalPattern.Expression), type,
+                    RelationalOperator(relationalPattern.OperatorToken.Kind()), _boolType, node);
+            }
+
+            if (pattern is RecursivePatternSyntax recursivePattern && recursivePattern.PropertyPatternClause != null)
+                return EmitPropertyPattern(value, value.Type, recursivePattern, node);
+
+            if (pattern is TypePatternSyntax typePattern)
+            {
+                ITypeSymbol type = Substitute(GetTypeInfo(typePattern.Type).Type);
+                return EmitTypeTest(value, value.Type, type, node);
+            }
+
+            AddError($"Property subpattern '{pattern.Kind()}' is not supported.", node);
+            return ConstantSlot(_boolType, false);
+        }
+
+        private Slot EmitTypeTest(Slot value, ITypeSymbol sourceType, ITypeSymbol targetType, SyntaxNode node)
+        {
+            if (targetType == null)
+                return ConstantSlot(_boolType, false);
+
+            if (UdonTypeSystem.IsUserStruct(targetType))
+                return ConstantSlot(_boolType, SymbolEqualityComparer.Default.Equals(sourceType, targetType));
+
+            if (targetType.SpecialType == SpecialType.System_Object)
+                return EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
+                    "op_Inequality", _boolType, node);
+
+            if (targetType.TypeKind != TypeKind.Interface && !DerivesFromBetterUdon(targetType))
+                return ConstantSlot(_boolType, IsAssignableTo(sourceType, targetType));
+
+            Slot result = NewSlot(_boolType, "typePattern");
+            Copy(ConstantSlot(_boolType, false), result);
+            string endLabel = NewLabel("typePatternEnd");
+            string notNullLabel = NewLabel("typePatternNotNull");
+            Slot isNull = EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(isNull, notNullLabel);
+            _asm.Jump(endLabel);
+            _asm.MarkLabel(notNullLabel);
+
+            Slot marker = EmitGetProgramVariable(value, TypeMarkerSymbol, "type pattern");
+            foreach (INamedTypeSymbol candidate in GetDispatchBehaviourTypes())
+            {
+                if (!IsAssignableTo(candidate, targetType))
+                    continue;
+
+                Slot expected = ConstantSlot(_stringType, candidate.ToDisplayString());
+                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, node);
+                string next = NewLabel("typePatternNext");
+                _asm.JumpIfFalse(matches, next);
+                Copy(ConstantSlot(_boolType, true), result);
+                _asm.Jump(endLabel);
+                _asm.MarkLabel(next);
+            }
+
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
+        private Slot EmitPropertyFromSlot(Slot receiver, IPropertySymbol property, SyntaxNode node)
+        {
+            ITypeSymbol receiverType = receiver.Type;
+
+            if (UdonTypeSystem.IsUserStruct(receiverType))
+            {
+                IFieldSymbol backing = GetBackingField(property);
+                if (backing != null)
+                {
+                    StructLayout layout = GetStructLayout(receiverType);
+                    int index = layout?.GetIndex(backing) ?? -1;
+                    Slot result = NewSlot(property.Type, "propertyPatternValue");
+                    if (index >= 0)
+                        PushObjectArrayIndex(receiver, index, result);
+                    return MaybeCloneStruct(result);
+                }
+
+                if (property.GetMethod != null && AccessorHasBody(property.GetMethod))
+                    return MaybeCloneStruct(InlineMethod(property.GetMethod, receiver, new List<Slot>(), node));
+
+                AddError($"Struct property '{property.Name}' has no body to evaluate in a pattern.", node);
+                return NewSlot(property.Type, "bad");
+            }
+
+            if (property.ContainingType?.TypeKind == TypeKind.Interface ||
+                (property.IsVirtual || property.IsAbstract || property.IsOverride) && !property.IsSealed)
+                return EmitClosedWorldPropertyGet(property, receiver, node);
+
+            if (DerivesFromBetterUdon(receiverType) || DerivesFromBetterUdon(property.ContainingType))
+            {
+                if (GetBackingField(property) != null)
+                    return EmitReadBehaviourMember(receiver, property.Name, property.Type, node);
+
+                if (property.GetMethod != null && AccessorHasBody(property.GetMethod))
+                    return MaybeCloneStruct(InlineRemoteMethod(property.GetMethod, receiver, new List<Slot>(), node));
+            }
+
+            return ReadExternMember(receiver, UdonExternSignatures.PropertyGet(property), property.Type, node);
+        }
+
+        private static IPropertySymbol FindPatternProperty(ITypeSymbol type, string name)
+        {
+            for (INamedTypeSymbol current = type as INamedTypeSymbol; current != null; current = current.BaseType)
+            {
+                foreach (IPropertySymbol property in current.GetMembers(name).OfType<IPropertySymbol>())
+                {
+                    if (!property.IsStatic && !property.IsIndexer)
+                        return property;
+                }
+            }
+
+            if (type.TypeKind == TypeKind.Interface)
+            {
+                foreach (IPropertySymbol property in type.GetMembers(name).OfType<IPropertySymbol>())
+                {
+                    if (!property.IsStatic && !property.IsIndexer)
+                        return property;
+                }
+            }
+
+            return null;
         }
 
         private Slot EmitLogicalNot(Slot value)
