@@ -295,6 +295,9 @@ namespace BetterUdon.Editor
                 if (!property.IsStatic && TryGetBehaviourPropertySlot(property, out Slot propertySlot))
                     return MaybeCloneStruct(propertySlot);
 
+                if (NeedsClosedWorldPropertyDispatch(property, receiverSyntax))
+                    return EmitClosedWorldPropertyGet(property, EmitExpression(receiverSyntax), memberAccess);
+
                 // A property on another behaviour is read from its heap (auto property) or by inlining
                 // its accessor with that behaviour as 'this'.
                 if (!property.IsStatic && !IsBehaviourReceiver(receiverSyntax) && DerivesFromBetterUdon(property.ContainingType))
@@ -1198,6 +1201,15 @@ namespace BetterUdon.Editor
                         if (!property.IsStatic && IsRemoteMemberOf(property))
                         {
                             lvalue = CreateRemotePropertyLValue(property, memberAccess);
+                            return true;
+                        }
+
+                        if (NeedsClosedWorldPropertyDispatch(property, memberAccess.Expression))
+                        {
+                            Slot dispatchReceiver = EmitExpression(memberAccess.Expression);
+                            lvalue = new CallbackLValue(property.Type,
+                                clone => EmitClosedWorldPropertyGet(property, dispatchReceiver, memberAccess),
+                                value => EmitClosedWorldPropertySet(property, dispatchReceiver, value, memberAccess));
                             return true;
                         }
 

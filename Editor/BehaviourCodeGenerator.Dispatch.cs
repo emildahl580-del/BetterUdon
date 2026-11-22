@@ -20,9 +20,17 @@ namespace BetterUdon.Editor
             public IMethodSymbol Method;
         }
 
+        private sealed class PropertyDispatchTarget
+        {
+            public INamedTypeSymbol Type;
+            public IPropertySymbol Property;
+        }
+
         private List<INamedTypeSymbol> _dispatchBehaviourTypes;
         private readonly Dictionary<IMethodSymbol, List<DispatchTarget>> _dispatchTargets =
             new Dictionary<IMethodSymbol, List<DispatchTarget>>(SymbolEqualityComparer.Default);
+        private readonly Dictionary<IPropertySymbol, List<PropertyDispatchTarget>> _propertyDispatchTargets =
+            new Dictionary<IPropertySymbol, List<PropertyDispatchTarget>>(SymbolEqualityComparer.Default);
 
         private bool NeedsClosedWorldDispatch(IMethodSymbol method, InvocationExpressionSyntax invocation)
         {
@@ -103,6 +111,210 @@ namespace BetterUdon.Editor
 
             _asm.MarkLabel(endLabel);
             return result;
+        }
+
+        private bool NeedsClosedWorldPropertyDispatch(IPropertySymbol property, ExpressionSyntax receiver)
+        {
+            if (property == null || property.IsStatic || property.IsIndexer ||
+                !(property.ContainingType is INamedTypeSymbol containing))
+                return false;
+
+            if (containing.TypeKind == TypeKind.Struct)
+                return false;
+
+            if (receiver is BaseExpressionSyntax)
+                return false;
+
+            bool polymorphic = containing.TypeKind == TypeKind.Interface ||
+                               ((property.IsVirtual || property.IsAbstract || property.IsOverride) &&
+                                !property.IsSealed);
+
+            if (!polymorphic)
+                return false;
+
+            return property.DeclaringSyntaxReferences.Length > 0 &&
+                   !UdonTypeSystem.IsExternAssembly(property.ContainingAssembly);
+        }
+
+        private Slot EmitClosedWorldPropertyGet(IPropertySymbol property, Slot receiver, SyntaxNode node)
+        {
+            List<PropertyDispatchTarget> targets = GetPropertyDispatchTargets(property);
+
+            if (targets.Count == 0)
+            {
+                AddError($"No concrete BetterUdon implementation of property '{property.Name}' was found for " +
+                         "closed-world dispatch.", node);
+                return NewSlot(property.Type, "bad");
+            }
+
+            Slot result = NewSlot(property.Type, "dispatchProperty");
+            EmitDefaultValue(result, property.Type);
+            string endLabel = NewLabel("propDispatchEnd");
+
+            Slot isNull = EmitBinaryOperator(receiver, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            string notNull = NewLabel("propDispatchNotNull");
+            _asm.JumpIfFalse(isNull, notNull);
+            _asm.Jump(endLabel);
+            _asm.MarkLabel(notNull);
+
+            Slot marker = EmitGetProgramVariable(receiver, TypeMarkerSymbol, "property dispatch type");
+
+            foreach (PropertyDispatchTarget target in targets)
+            {
+                Slot expected = ConstantSlot(_stringType, target.Type.ToDisplayString());
+                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, node);
+                string nextLabel = NewLabel("propDispatchNext");
+                _asm.JumpIfFalse(matches, nextLabel);
+
+                Slot value = null;
+
+                if (target.Property.GetMethod != null && GetBackingField(target.Property) != null &&
+                    target.Property.GetMethod.DeclaringSyntaxReferences.Length == 0)
+                {
+                    value = EmitReadBehaviourMember(receiver, target.Property.Name, target.Property.Type, node);
+                }
+                else if (target.Property.GetMethod != null &&
+                         target.Property.GetMethod.DeclaringSyntaxReferences.Length > 0)
+                {
+                    value = InlineRemoteMethod(target.Property.GetMethod, receiver, new List<Slot>(), node);
+                }
+                else if (target.Property.GetMethod != null)
+                {
+                    value = EmitReadBehaviourMember(receiver, target.Property.Name, target.Property.Type, node);
+                }
+
+                if (value != null)
+                    Copy(ConvertTo(value, result.Type), result);
+
+                _asm.Jump(endLabel);
+                _asm.MarkLabel(nextLabel);
+            }
+
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
+        private void EmitClosedWorldPropertySet(IPropertySymbol property, Slot receiver, Slot value, SyntaxNode node)
+        {
+            List<PropertyDispatchTarget> targets = GetPropertyDispatchTargets(property);
+
+            if (targets.Count == 0)
+            {
+                AddError($"No concrete BetterUdon implementation of property '{property.Name}' was found for " +
+                         "closed-world dispatch.", node);
+                return;
+            }
+
+            string endLabel = NewLabel("propSetDispatchEnd");
+
+            Slot isNull = EmitBinaryOperator(receiver, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            string notNull = NewLabel("propSetDispatchNotNull");
+            _asm.JumpIfFalse(isNull, notNull);
+            _asm.Jump(endLabel);
+            _asm.MarkLabel(notNull);
+
+            Slot marker = EmitGetProgramVariable(receiver, TypeMarkerSymbol, "property dispatch type");
+
+            foreach (PropertyDispatchTarget target in targets)
+            {
+                Slot expected = ConstantSlot(_stringType, target.Type.ToDisplayString());
+                Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, node);
+                string nextLabel = NewLabel("propSetDispatchNext");
+                _asm.JumpIfFalse(matches, nextLabel);
+
+                if (target.Property.SetMethod != null && GetBackingField(target.Property) != null &&
+                    target.Property.SetMethod.DeclaringSyntaxReferences.Length == 0)
+                {
+                    EmitWriteBehaviourMember(receiver, target.Property.Name,
+                        ConvertTo(value, target.Property.Type));
+                }
+                else if (target.Property.SetMethod != null &&
+                         target.Property.SetMethod.DeclaringSyntaxReferences.Length > 0)
+                {
+                    InlineRemoteMethod(target.Property.SetMethod, receiver, new List<Slot> { value }, node);
+                }
+                else if (target.Property.SetMethod != null)
+                {
+                    EmitWriteBehaviourMember(receiver, target.Property.Name,
+                        ConvertTo(value, target.Property.Type));
+                }
+
+                _asm.Jump(endLabel);
+                _asm.MarkLabel(nextLabel);
+            }
+
+            _asm.MarkLabel(endLabel);
+        }
+
+        private List<PropertyDispatchTarget> GetPropertyDispatchTargets(IPropertySymbol property)
+        {
+            if (_propertyDispatchTargets.TryGetValue(property, out List<PropertyDispatchTarget> cached))
+                return cached;
+
+            List<PropertyDispatchTarget> targets = new List<PropertyDispatchTarget>();
+
+            foreach (INamedTypeSymbol type in GetDispatchBehaviourTypes())
+            {
+                IPropertySymbol implementation = FindPropertyImplementation(type, property);
+
+                if (implementation == null || implementation.IsAbstract)
+                    continue;
+
+                bool hasGetter = implementation.GetMethod != null &&
+                                 (implementation.GetMethod.DeclaringSyntaxReferences.Length > 0 ||
+                                  GetBackingField(implementation) != null);
+                bool hasSetter = implementation.SetMethod != null &&
+                                 (implementation.SetMethod.DeclaringSyntaxReferences.Length > 0 ||
+                                  GetBackingField(implementation) != null);
+
+                if (!hasGetter && !hasSetter)
+                    continue;
+
+                targets.Add(new PropertyDispatchTarget { Type = type, Property = implementation });
+            }
+
+            _propertyDispatchTargets[property] = targets;
+            return targets;
+        }
+
+        private IPropertySymbol FindPropertyImplementation(INamedTypeSymbol type, IPropertySymbol property)
+        {
+            if (property.ContainingType.TypeKind == TypeKind.Interface)
+            {
+                IPropertySymbol implementation =
+                    type.FindImplementationForInterfaceMember(property) as IPropertySymbol;
+
+                if (implementation == null || implementation == property)
+                    return null;
+
+                return FindMostDerivedPropertyOverride(type, implementation) ?? implementation;
+            }
+
+            IPropertySymbol mostDerived = FindMostDerivedPropertyOverride(type, property);
+            if (mostDerived != null)
+                return mostDerived;
+
+            return property.IsAbstract ? null : property;
+        }
+
+        private static IPropertySymbol FindMostDerivedPropertyOverride(INamedTypeSymbol type, IPropertySymbol property)
+        {
+            for (INamedTypeSymbol current = type; current != null; current = current.BaseType)
+            {
+                foreach (IPropertySymbol candidate in current.GetMembers(property.Name).OfType<IPropertySymbol>())
+                {
+                    if (!candidate.IsOverride)
+                        continue;
+
+                    if (SymbolEqualityComparer.Default.Equals(candidate.Type, property.Type) &&
+                        candidate.Parameters.Length == property.Parameters.Length)
+                        return candidate;
+                }
+            }
+
+            return null;
         }
 
         private List<DispatchTarget> GetDispatchTargets(IMethodSymbol method)

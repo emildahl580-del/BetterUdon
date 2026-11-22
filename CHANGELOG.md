@@ -13,8 +13,10 @@
   `Box<string>` get independent layouts.
 - Closed-world dispatch for `virtual`, `override`, `abstract` and interface method calls. Receiver
   type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
+  Virtual and interface properties use the same dispatch for getters and setters.
 - `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` intrinsics, including growth, struct
-  elements/values and string keys. Dictionary uses linear search for correct member-wise equality.
+  elements/values, string keys and `TryGetValue`. Dictionary uses linear search for correct
+  member-wise equality.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
 

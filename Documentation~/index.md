@@ -305,12 +305,12 @@ The same compiler-owned collection approach covers the other common containers:
 | `Queue<T>` | `[ T[] items, int count ]` | `Enqueue`, `Dequeue`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
 | `Stack<T>` | `[ T[] items, int count ]` | `Push`, `Pop`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
 | `HashSet<T>` | `[ T[] items, int count ]` | `Add`, `Remove`, `Contains`, `Count`, `Clear`, `ToArray` |
-| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear` |
+| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `TryGetValue`, `Remove`, `Count`, `Clear` |
 
 Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
 use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
-keeps equality correct for primitives and user structs without a custom runtime. `TryGetValue`,
-`Keys`/`Values`, `KeyValuePair` enumeration and dictionary `foreach` are still open in
+keeps equality correct for primitives and user structs without a custom runtime. `Keys`/`Values`,
+`KeyValuePair` enumeration and dictionary `foreach` are still open in
 `Documentation~/aot-expansion.md`.
 
 ---
@@ -506,10 +506,10 @@ public class Shooter : BetterUdonBehaviour
 }
 ```
 
-`base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch. The
-receiver must be a BetterUdon behaviour; plain classes and structs are not part of the type-marker
-table yet. Virtual properties, indexers and delegates are still open items in
-`Documentation~/aot-expansion.md`.
+`base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch. Virtual
+and interface properties use the same type-marker switch for their getter and setter. The receiver must
+be a BetterUdon behaviour; plain classes and structs are not part of the type-marker table yet.
+Indexers and delegates are still open items in `Documentation~/aot-expansion.md`.
 
 ---
 

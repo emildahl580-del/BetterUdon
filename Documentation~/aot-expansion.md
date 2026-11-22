@@ -48,17 +48,20 @@ Use the fact that all project types are visible at compile time.
       asynchronous event boundary when it is not.
 - [ ] `is` / `as` / casts against known BetterUdon and user types.
 - [x] Diagnostics for open-world or missing implementations.
-- [ ] Virtual/interface properties and indexers.
-- [x] Tests: interface dispatch, virtual override, method arguments and return values.
+- [x] Virtual/interface properties.
+- [ ] Virtual/interface indexers.
+- [x] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
+      get and set.
 - [ ] Tests: delegate with args/return, event with multiple subscribers, struct implementation,
-      null target, virtual property.
+      null target, virtual indexer.
 
 ## 4. Collections
 
 Implement the collection library in lowered code, not as a runtime service.
 
-- [~] `Dictionary<K,V>`: hashing, equality, insert, lookup, remove, resize, enumeration.
-      Linear search works; `TryGetValue`, `Keys`/`Values` and dictionary `foreach` are still pending.
+- [~] `Dictionary<K,V>`: insert, lookup, remove, resize, `TryGetValue`, enumeration.
+      Linear search, indexer, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear` and `TryGetValue` work;
+      `Keys`/`Values` and dictionary `foreach` are still pending.
 - [x] `HashSet<T>`: add, remove, contains, clear, to-array.
 - [x] `Queue<T>`: enqueue, dequeue, peek, count, contains, to-array, grow.
 - [x] `Stack<T>`: push, pop, peek, count, contains, to-array, grow.

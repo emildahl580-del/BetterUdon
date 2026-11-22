@@ -244,6 +244,23 @@ namespace BetterUdon.Editor
             _asm.MarkLabel(endLabel);
         }
 
+        private LValue EmitOutArgument(ExpressionSyntax expression)
+        {
+            if (expression is DeclarationExpressionSyntax declaration)
+            {
+                ILocalSymbol local = GetDeclaredSymbol(declaration.Designation) as ILocalSymbol;
+                if (local == null)
+                    return null;
+
+                ITypeSymbol type = Substitute(local.Type);
+                Slot slot = DeclareLocal(local, type, local.Name);
+                EmitDefaultValue(slot, type);
+                return new SlotLValue(this, slot);
+            }
+
+            return EmitLValue(expression);
+        }
+
         private bool TryEmitDictionaryMethod(IMethodSymbol method, InvocationExpressionSyntax invocation, out Slot result)
         {
             result = null;
@@ -258,6 +275,41 @@ namespace BetterUdon.Editor
             Slot dictionary = EmitExpression(memberAccess.Expression);
             if (dictionary == null)
                 return false;
+
+            if (method.Name == "TryGetValue" && invocation.ArgumentList.Arguments.Count == 2)
+            {
+                Slot key = ConvertTo(EmitExpression(invocation.ArgumentList.Arguments[0].Expression), keyType);
+                LValue valueTarget = EmitOutArgument(invocation.ArgumentList.Arguments[1].Expression);
+
+                if (valueTarget == null)
+                {
+                    AddError("Dictionary.TryGetValue needs a variable for its out parameter.", invocation);
+                    result = NewSlot(_boolType, "bad");
+                    return true;
+                }
+
+                Slot index = EmitDictionaryFindIndex(dictionary, keyType, key, invocation);
+                result = NewSlot(_boolType, "tryGet");
+                Copy(ConstantSlot(_boolType, false), result);
+
+                string missingLabel = NewLabel("dictTryMissing");
+                string endLabel = NewLabel("dictTryEnd");
+                Slot found = EmitBinaryOperator(index, IntConstant(0), _intType, "op_GreaterThanOrEqual",
+                    _boolType, invocation);
+                _asm.JumpIfFalse(found, missingLabel);
+
+                Slot values = DictionaryValues(dictionary);
+                ArrayElementLValue value = new ArrayElementLValue(this, values, index,
+                    MakeArrayType(valueType), valueType);
+                valueTarget.Set(value.Get(true));
+                Copy(ConstantSlot(_boolType, true), result);
+                _asm.Jump(endLabel);
+
+                _asm.MarkLabel(missingLabel);
+                valueTarget.Set(EmitDefaultValueSlot(valueType));
+                _asm.MarkLabel(endLabel);
+                return true;
+            }
 
             List<Slot> arguments = invocation.ArgumentList.Arguments
                 .Select(argument => EmitExpression(argument.Expression))

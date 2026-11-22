@@ -120,7 +120,7 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   `Clear`, `Contains`, `IndexOf`, `ToArray`, `foreach`.
 - **Other collections** — `Queue<T>` (`Enqueue`/`Dequeue`/`Peek`), `Stack<T>` (`Push`/`Pop`/`Peek`),
   `HashSet<T>` (`Add`/`Remove`/`Contains`), and `Dictionary<K,V>` (indexer, `Add`, `ContainsKey`,
-  `Remove`, `Count`) with struct/string keys and values.
+  `TryGetValue`, `Remove`, `Count`) with struct/string keys and values.
 - **Iterators** — `yield return` and `yield break` lowered to a synchronous state machine for direct
   `foreach` over a local iterator method.
 - `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
@@ -145,8 +145,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - **Several behaviours on one GameObject** — including two components of the same type. Each proxy
   gets its own backing `UdonBehaviour`, and typed `GetComponent<T>()` returns the matching one.
 - **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
-- **Virtual and interface calls** — closed-world dispatch over the receiver's type marker; each
-  implementation is inlined with the receiver bound, so calls are synchronous.
+- **Virtual and interface calls** — closed-world dispatch over the receiver's type marker for methods
+  and properties; each implementation is inlined with the receiver bound, so calls are synchronous.
 - **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
   `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T` and nested generic calls.
 - **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
