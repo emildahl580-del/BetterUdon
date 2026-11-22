@@ -10,7 +10,8 @@
   whose block has not been compiled yet still resolves.
 - Monomorphised generic methods and generic structs. Type arguments are substituted through inlined
   bodies, slots, arrays, defaults, `typeof`, constructors and nested generic calls; `Box<int>` and
-  `Box<string>` get independent layouts.
+  `Box<string>` get independent layouts. Numeric `IComparable<T>.CompareTo` constraints lower to
+  direct comparisons.
 - Closed-world dispatch for `virtual`, `override`, `abstract` and interface method calls. Receiver
   type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
   Virtual and interface properties use the same dispatch for getters and setters.

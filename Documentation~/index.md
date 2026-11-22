@@ -356,9 +356,10 @@ method or constructor on either layout sees the substituted field types. `defaul
 (no-argument value types), `typeof(T)`, `T[]`, `List<T>`, `ref`/`out T` and generic struct arrays are
 covered.
 
-Constraints that only need substitution (`where T : struct`, `class`, `new()`) are accepted. A
-constraint that requires calling a member on `T` through an interface uses the closed-world dispatch
-below. There is no runtime generic construction: every instantiation must be visible to the compiler.
+Constraints that only need substitution (`where T : struct`, `class`, `new()`) are accepted. A numeric
+`T : IComparable<T>` constraint can call `CompareTo`; it lowers to direct comparisons. Other
+constrained interface member calls still need work. There is no runtime generic construction: every
+instantiation must be visible to the compiler.
 
 ### Recursion
 

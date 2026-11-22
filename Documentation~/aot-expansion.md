@@ -27,7 +27,8 @@ Make generic code compile once per concrete instantiation.
 - [x] `default(T)`, `new T()`, `typeof(T)`, `T[]`, `List<T>` and `ref`/`out T` inside generic bodies.
 - [x] Generic structs: layout and field access per `Struct<T>` instantiation.
 - [x] Generic constraints that only need type substitution (`where T : struct`, `class`, `new()`).
-- [ ] Constraints that require interface member calls are blocked on closed-world dispatch.
+- [~] Constraints that require interface member calls. Numeric `IComparable<T>.CompareTo` is lowered
+      directly; other constrained interface calls are still pending.
 - [ ] Deduplication policy: share reference-type instantiations where the representation is
       already `object`; specialise value-type instantiations.
 - [ ] Code-size guard and diagnostic for pathological instantiation counts.

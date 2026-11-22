@@ -241,6 +241,9 @@ namespace BetterUdon.Editor
             if (method.ReducedFrom != null && instance != null)
                 arguments.Insert(0, instance);
 
+            if (TryEmitCompareTo(method, instance, arguments, invocation, out Slot compareResult))
+                return compareResult;
+
             if (NeedsClosedWorldDispatch(method, invocation))
                 return EmitClosedWorldDispatch(method, instance, arguments, invocation);
 

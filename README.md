@@ -151,7 +151,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - **Virtual and interface calls** — closed-world dispatch over the receiver's type marker for methods
   and properties; each implementation is inlined with the receiver bound, so calls are synchronous.
 - **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
-  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T` and nested generic calls.
+  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T`, nested generic calls and numeric
+  `IComparable<T>.CompareTo` constraints.
 - **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
 
 ### UdonSharp compatibility
