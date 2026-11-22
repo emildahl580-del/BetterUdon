@@ -81,6 +81,18 @@ namespace BetterUdon.Editor
             if (TryEmitListMethod(method, invocation, out Slot listResult))
                 return listResult;
 
+            if (TryEmitDictionaryMethod(method, invocation, out Slot dictionaryResult))
+                return dictionaryResult;
+
+            if (TryEmitQueueMethod(method, invocation, out Slot queueResult))
+                return queueResult;
+
+            if (TryEmitStackMethod(method, invocation, out Slot stackResult))
+                return stackResult;
+
+            if (TryEmitHashSetMethod(method, invocation, out Slot hashSetResult))
+                return hashSetResult;
+
             // Struct instances have no heap identity, so Equals is lowered to a member-wise comparison.
             if (method.Name == "Equals" &&
                 method.Parameters.Length == 1 &&
@@ -764,9 +776,24 @@ namespace BetterUdon.Editor
                     arguments.Add(EmitExpression(argument.Expression));
             }
 
+            // Dictionary<K,V> is lowered to [ keys, values, count ].
+            if (TryGetDictionaryTypes(type, out ITypeSymbol dictionaryKeyType, out ITypeSymbol dictionaryValueType))
+                return CreateDictionary(dictionaryKeyType, dictionaryValueType,
+                    arguments.Count > 0 ? ConvertTo(arguments[0], _intType) : IntConstant(0));
+
             // List<T> is lowered to a two element object[] by the compiler.
             if (TryGetListElementType(type, out ITypeSymbol listElementType))
                 return CreateList(listElementType, arguments.Count > 0 ? ConvertTo(arguments[0], _intType) : IntConstant(0));
+
+            // Queue<T> and Stack<T> share the same [items, count] representation.
+            if (TryGetQueueElementType(type, out ITypeSymbol queueElementType))
+                return CreateList(queueElementType, arguments.Count > 0 ? ConvertTo(arguments[0], _intType) : IntConstant(0));
+
+            if (TryGetStackElementType(type, out ITypeSymbol stackElementType))
+                return CreateList(stackElementType, arguments.Count > 0 ? ConvertTo(arguments[0], _intType) : IntConstant(0));
+
+            if (TryGetHashSetElementType(type, out ITypeSymbol hashSetElementType))
+                return CreateList(hashSetElementType, arguments.Count > 0 ? ConvertTo(arguments[0], _intType) : IntConstant(0));
 
             if (UdonTypeSystem.IsUserStruct(type))
             {

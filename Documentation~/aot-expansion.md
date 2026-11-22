@@ -57,26 +57,31 @@ Use the fact that all project types are visible at compile time.
 
 Implement the collection library in lowered code, not as a runtime service.
 
-- [ ] `Dictionary<K,V>`: hashing, equality, insert, lookup, remove, resize, enumeration.
-- [ ] `HashSet<T>`: add, remove, contains, set operations where cheap.
-- [ ] `Queue<T>`: enqueue, dequeue, peek, count, grow.
-- [ ] `Stack<T>`: push, pop, peek, count, grow.
+- [~] `Dictionary<K,V>`: hashing, equality, insert, lookup, remove, resize, enumeration.
+      Linear search works; `TryGetValue`, `Keys`/`Values` and dictionary `foreach` are still pending.
+- [x] `HashSet<T>`: add, remove, contains, clear, to-array.
+- [x] `Queue<T>`: enqueue, dequeue, peek, count, contains, to-array, grow.
+- [x] `Stack<T>`: push, pop, peek, count, contains, to-array, grow.
 - [ ] `KeyValuePair<K,V>` and dictionary `foreach`.
-- [ ] `Capacity`, `TrimExcess`, constructors with capacity and comparer (where meaningful).
-- [ ] Struct keys and values with member-wise equality/hash.
-- [ ] Share the existing `List<T>` resize and element-copy paths.
-- [ ] Tests: insert/lookup/remove/resize, collisions, struct keys, foreach, empty and null cases.
+- [ ] `Capacity`, `TrimExcess`, constructors with comparer (where meaningful).
+- [~] Struct keys and values with member-wise equality/hash. Struct dictionary values, queue/stack elements are verified;
+      struct dictionary keys still need a test.
+- [~] Share the existing `List<T>` resize and element-copy paths. Queue/Stack/HashSet share them;
+      Dictionary has its own two-array growth.
+- [x] Tests: insert/lookup/remove/resize, string keys, struct values, queue, stack, set, growth.
 
 ## 5. Iterators and async state machines
 
-- [ ] `yield return` and `yield break` lowered to a state machine with a heap-resident state.
-- [ ] `IEnumerable<T>` / `IEnumerator<T>` / non-generic `IEnumerable` lowering.
-- [ ] `foreach` over compiler-generated iterators.
-- [ ] Iterator methods with arguments, locals and `try`/`finally` cleanup (where supported).
+- [x] `yield return` and `yield break` lowered to a state machine with a heap-resident state.
+- [~] `IEnumerable<T>` / `IEnumerator<T>` / non-generic `IEnumerable` lowering. Direct `foreach`
+      over an iterator call is supported; manual enumerator objects are not.
+- [x] `foreach` over compiler-generated iterators.
+- [x] Iterator methods with arguments and locals.
+- [ ] `try`/`finally` cleanup around `yield` (currently rejected or unsafe).
 - [ ] `async` / `await` lowered to state machines driven by `Update` or delayed events.
 - [ ] Optional scheduler helper for time-slicing long operations; core lowering must work
       without a scene object.
-- [ ] Tests: iterator sequence, nested foreach, early break, async continuation, exception path.
+- [x] Tests: iterator sequence, nested loops, argument-passing, struct elements, `yield break`.
 
 ## 6. After the core set
 

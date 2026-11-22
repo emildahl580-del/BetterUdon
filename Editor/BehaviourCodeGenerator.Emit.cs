@@ -649,6 +649,10 @@ namespace BetterUdon.Editor
                     EmitReturn(returnStatement);
                     break;
 
+                case YieldStatementSyntax yieldStatement:
+                    EmitYield(yieldStatement);
+                    break;
+
                 case BreakStatementSyntax _:
                     if (_loops.Count > 0)
                         _asm.Jump(_loops.Peek().BreakLabel);
@@ -827,6 +831,9 @@ namespace BetterUdon.Editor
 
         private void EmitForEach(ForEachStatementSyntax forEachStatement)
         {
+            if (TryEmitForEachIterator(forEachStatement))
+                return;
+
             ITypeSymbol collectionType = GetType(forEachStatement.Expression);
 
             if (TryGetListElementType(collectionType, out ITypeSymbol listElementType))

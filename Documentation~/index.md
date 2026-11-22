@@ -296,6 +296,23 @@ Value semantics compose: `List<MyStruct>` stores struct references, and element 
 through the normal struct rules, so `list[0].x = 1` needs the usual C# dance (read, modify, write back)
 and a copy never aliases the element.
 
+### Queue, Stack, HashSet and Dictionary
+
+The same compiler-owned collection approach covers the other common containers:
+
+| Type | Representation | Coverage |
+| --- | --- | --- |
+| `Queue<T>` | `[ T[] items, int count ]` | `Enqueue`, `Dequeue`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
+| `Stack<T>` | `[ T[] items, int count ]` | `Push`, `Pop`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
+| `HashSet<T>` | `[ T[] items, int count ]` | `Add`, `Remove`, `Contains`, `Count`, `Clear`, `ToArray` |
+| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `Remove`, `Count`, `Clear` |
+
+Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
+use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
+keeps equality correct for primitives and user structs without a custom runtime. `TryGetValue`,
+`Keys`/`Values`, `KeyValuePair` enumeration and dictionary `foreach` are still open in
+`Documentation~/aot-expansion.md`.
+
 ---
 
 ## 6. Other language features
@@ -369,6 +386,32 @@ restrictions are:
 - No `ref` / `out` / `in` parameters.
 - A Udon event that takes arguments cannot be a `[RecursiveMethod]`; move the recursion into a helper.
 - `[NetworkCallable]` and `[RecursiveMethod]` cannot be combined.
+
+### Iterators
+
+A local iterator method can be consumed by `foreach`; the compiler compiles its body into a
+resumable block rather than trying to return an `IEnumerator` object. The state of the enumeration is
+a heap integer, and the method's locals live on the heap, so reaching the next `yield return` jumps
+back to the instruction after the previous one. Nested loops, arguments, locals, struct elements and
+`yield break` are supported.
+
+```csharp
+private IEnumerable<int> Numbers(int count)
+{
+    for (int i = 0; i < count; i++)
+        yield return i;
+}
+
+public void Run()
+{
+    foreach (int number in Numbers(4))
+        total += number;
+}
+```
+
+This is intentionally a **synchronous** lowering for direct `foreach` use, not a coroutine scheduler.
+Manual `GetEnumerator`/`MoveNext` objects, `yield` inside `try`/`finally`, and `async`/`await` are still
+open items.
 
 ### Across behaviours
 
@@ -677,8 +720,12 @@ Some limits remain:
   generic BetterUdonBehaviour components are not supported, and every instantiation must be visible at
   compile time because Udon cannot construct a generic type at runtime. Constraints that call members
   through an interface use closed-world dispatch.
-- **Collections beyond `List<T>`.** `Dictionary<K,V>` is feasible with linear probing but not
-  implemented.
+- **Collection limits.** `List<T>`, `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` are
+  compiler intrinsics. HashSet/Dictionary use linear scans rather than hashing, dictionary
+  `TryGetValue`/`Keys`/`Values`/`foreach` are still pending, and collection field initialisers must be
+  created in `Start`.
+- **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
+  enumerators and `async`/`await` are not implemented yet.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**
   `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
   backings and collection fields are real heap variables but are not Unity-serialisable, so they start

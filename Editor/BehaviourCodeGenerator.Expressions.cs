@@ -315,6 +315,18 @@ namespace BetterUdon.Editor
                 if (TryGetListElementType(property.ContainingType, out ITypeSymbol listElementType))
                     return EmitListProperty(memberAccess, property, EmitExpression(receiverSyntax), listElementType);
 
+                if (TryGetQueueElementType(property.ContainingType, out ITypeSymbol queueElementType))
+                    return EmitSequenceProperty(memberAccess, property, EmitExpression(receiverSyntax), queueElementType);
+
+                if (TryGetStackElementType(property.ContainingType, out ITypeSymbol stackElementType))
+                    return EmitSequenceProperty(memberAccess, property, EmitExpression(receiverSyntax), stackElementType);
+
+                if (TryGetHashSetElementType(property.ContainingType, out ITypeSymbol hashSetElementType))
+                    return EmitSequenceProperty(memberAccess, property, EmitExpression(receiverSyntax), hashSetElementType);
+
+                if (TryGetDictionaryTypes(property.ContainingType, out _, out _))
+                    return EmitDictionaryProperty(memberAccess, property, EmitExpression(receiverSyntax));
+
                 // Properties that declare their own accessor body are inlined like methods.
                 if (GetBackingField(property) == null && AccessorHasBody(property.GetMethod))
                 {
@@ -628,6 +640,13 @@ namespace BetterUdon.Editor
             if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression))
             {
                 Slot value = EmitExpression(assignment.Right);
+
+                if (value == null)
+                {
+                    AddError($"Unable to evaluate the right-hand side of '{assignment.Left}'.", assignment);
+                    return null;
+                }
+
                 target.Set(value);
                 return target.Get(true);
             }
@@ -1096,6 +1115,17 @@ namespace BetterUdon.Editor
                         lvalue = new CallbackLValue(listElementType,
                             clone => ListElementGet(listSlot, listElementType, indexSlot),
                             value => ListElementSet(listSlot, listElementType, indexSlot, value));
+                        return true;
+                    }
+
+                    if (TryGetDictionaryTypes(containerType, out ITypeSymbol dictionaryKeyType, out ITypeSymbol dictionaryValueType))
+                    {
+                        Slot dictionarySlot = EmitExpression(elementAccess.Expression);
+                        Slot keySlot = ConvertTo(EmitExpression(elementAccess.ArgumentList.Arguments[0].Expression), dictionaryKeyType);
+
+                        lvalue = new CallbackLValue(dictionaryValueType,
+                            clone => EmitDictionaryGet(dictionarySlot, dictionaryKeyType, dictionaryValueType, keySlot, elementAccess),
+                            value => EmitDictionarySet(dictionarySlot, dictionaryKeyType, dictionaryValueType, keySlot, value, elementAccess));
                         return true;
                     }
 

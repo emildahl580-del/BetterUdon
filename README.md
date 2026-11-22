@@ -118,6 +118,11 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   member-wise `Equals`.
 - **`List<T>`** — `Count`, `Capacity` (read), indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`, `Remove`,
   `Clear`, `Contains`, `IndexOf`, `ToArray`, `foreach`.
+- **Other collections** — `Queue<T>` (`Enqueue`/`Dequeue`/`Peek`), `Stack<T>` (`Push`/`Pop`/`Peek`),
+  `HashSet<T>` (`Add`/`Remove`/`Contains`), and `Dictionary<K,V>` (indexer, `Add`, `ContainsKey`,
+  `Remove`, `Count`) with struct/string keys and values.
+- **Iterators** — `yield return` and `yield break` lowered to a synchronous state machine for direct
+  `foreach` over a local iterator method.
 - `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
 - Local functions with captures; properties with explicit or expression-bodied accessors.
 - `?.`, `??=`, `is null` / `is not null`, `switch` with `when`, `for` / `while` / `do` / `foreach`.
@@ -174,8 +179,9 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 ## Not supported
 
 Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
-components, delegates and lambdas, `try`/`catch`, `async`, `yield`, and `Dictionary<K,V>` plus the
-other collection types (in progress).
+components, delegates and lambdas, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects,
+`yield` inside `try`/`finally`, and dictionary `foreach`/`TryGetValue`/`Keys`/`Values`. These are
+tracked in `Documentation~/aot-expansion.md`.
 
 ## What's new
 
@@ -188,6 +194,7 @@ all fixed. **1.6.0** added `[RecursiveMethod]`, several behaviours per GameObjec
 
 `Documentation~/index.md` is a paper covering the runtime model, the struct and `List<T>` lowering
 strategies, the compiler architecture and the remaining limits.
+`Documentation~/aot-expansion.md` is the working checklist for the current AOT expansion.
 
 ## License
 
