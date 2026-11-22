@@ -40,6 +40,10 @@ namespace BetterUdon.Editor
         private readonly HashSet<string> _exportedEntryPoints = new HashSet<string>();
         private readonly List<Dictionary<ITypeParameterSymbol, ITypeSymbol>> _typeParameterMaps =
             new List<Dictionary<ITypeParameterSymbol, ITypeSymbol>>();
+        private readonly HashSet<IMethodSymbol> _genericInstantiations =
+            new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        private bool _genericExplosionReported;
+
 
         private Slot _udonThisSlot;
         private Slot _thisSlot;
@@ -201,6 +205,13 @@ namespace BetterUdon.Editor
             // inspector can display them.
             foreach (KeyValuePair<ISymbol, Slot> pair in _fieldSlots)
                 RegisterStructLayouts(pair.Key is IFieldSymbol field ? field.Type : null);
+
+            if (_asm.Slots.Count > 20000)
+            {
+                AddError($"This program generated {_asm.Slots.Count} heap slots. Generic or method " +
+                         "inlining has grown too large for Udon; reduce instantiation breadth or split " +
+                         "the behaviour.", null);
+            }
 
             return _asm.BuildAssembly();
         }

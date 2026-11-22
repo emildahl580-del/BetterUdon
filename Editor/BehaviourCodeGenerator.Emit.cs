@@ -861,6 +861,9 @@ namespace BetterUdon.Editor
             if (TryEmitForEachDictionaryKeys(forEachStatement))
                 return;
 
+            if (TryEmitForEachDictionaryCollection(forEachStatement))
+                return;
+
             if (TryEmitForEachDictionary(forEachStatement))
                 return;
 

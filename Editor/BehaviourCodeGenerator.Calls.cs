@@ -87,6 +87,9 @@ namespace BetterUdon.Editor
             if (TryEmitDictionaryMethod(method, invocation, out Slot dictionaryResult))
                 return dictionaryResult;
 
+            if (TryEmitDictionaryCollectionMethod(method, invocation, out Slot dictionaryCollectionResult))
+                return dictionaryCollectionResult;
+
             if (TryEmitQueueMethod(method, invocation, out Slot queueResult))
                 return queueResult;
 
@@ -689,6 +692,19 @@ namespace BetterUdon.Editor
             parameterSlots = null;
 
             PushTypeParameterMap(method);
+
+            if (method.IsGenericMethod)
+            {
+                _genericInstantiations.Add(method);
+
+                if (_genericInstantiations.Count > 256 && !_genericExplosionReported)
+                {
+                    _genericExplosionReported = true;
+                    AddError($"This behaviour contains more than {_genericInstantiations.Count} generic " +
+                             "method instantiations. Reduce generic breadth or split the behaviour.",
+                        node);
+                }
+            }
 
             try
             {

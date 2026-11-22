@@ -20,6 +20,8 @@ namespace BetterUdon.Editor
         private const int DictionaryKeysIndex = 0;
         private const int DictionaryValuesIndex = 1;
         private const int DictionaryCountIndex = 2;
+        private const int DictionaryCollectionDictionaryIndex = 0;
+        private const int DictionaryCollectionKindIndex = 1;
 
         private static bool TryGetDictionaryTypes(ITypeSymbol type, out ITypeSymbol keyType, out ITypeSymbol valueType)
         {
@@ -36,6 +38,48 @@ namespace BetterUdon.Editor
             valueType = named.TypeArguments[1];
             return true;
         }
+
+        private static bool TryGetDictionaryCollectionTypes(ITypeSymbol type, out ITypeSymbol keyType,
+            out ITypeSymbol valueType, out bool keys)
+        {
+            keyType = null;
+            valueType = null;
+            keys = false;
+
+            if (!(type is INamedTypeSymbol named) || named.ContainingType == null)
+                return false;
+
+            if (!TryGetDictionaryTypes(named.ContainingType, out keyType, out valueType))
+                return false;
+
+            if (named.Name == "KeyCollection")
+            {
+                keys = true;
+                return true;
+            }
+
+            if (named.Name == "ValueCollection")
+                return true;
+
+            return false;
+        }
+
+        private Slot CreateDictionaryCollection(Slot dictionary, ITypeSymbol collectionType, bool keys)
+        {
+            Slot wrapper = NewSlot(collectionType, keys ? "keys" : "values");
+            CreateObjectArray(wrapper, 2);
+            StoreStructField(wrapper, DictionaryCollectionDictionaryIndex, dictionary);
+            StoreStructField(wrapper, DictionaryCollectionKindIndex, IntConstant(keys ? 1 : 0));
+            return wrapper;
+        }
+
+        private Slot DictionaryOfCollection(Slot wrapper)
+        {
+            Slot dictionary = NewSlot(_objectType, "collectionDictionary");
+            PushObjectArrayIndex(wrapper, DictionaryCollectionDictionaryIndex, dictionary);
+            return dictionary;
+        }
+
 
         private Slot CreateDictionary(ITypeSymbol keyType, ITypeSymbol valueType, Slot capacity)
         {
@@ -286,6 +330,57 @@ namespace BetterUdon.Editor
             return true;
         }
 
+        private bool TryEmitForEachDictionaryCollection(ForEachStatementSyntax forEachStatement)
+        {
+            ITypeSymbol collectionType = GetType(forEachStatement.Expression);
+            if (!TryGetDictionaryCollectionTypes(collectionType, out ITypeSymbol keyType, out ITypeSymbol valueType,
+                    out bool keys))
+                return false;
+
+            Slot wrapper = EmitExpression(forEachStatement.Expression);
+            if (wrapper == null)
+                return false;
+
+            Slot dictionary = DictionaryOfCollection(wrapper);
+            ITypeSymbol elementType = keys ? keyType : valueType;
+            ITypeSymbol arrayType = MakeArrayType(elementType);
+            Slot items = keys ? DictionaryKeys(dictionary) : DictionaryValues(dictionary);
+            Slot count = DictionaryCount(dictionary);
+
+            ILocalSymbol elementSymbol = GetDeclaredSymbol(forEachStatement) as ILocalSymbol;
+            if (elementSymbol == null)
+                return false;
+
+            using (PushScope())
+            {
+                Slot element = DeclareLocal(elementSymbol, elementType, forEachStatement.Identifier.ValueText);
+                Slot index = NewSlot(_intType, "collectionIndex");
+                Copy(IntConstant(0), index);
+
+                string loopLabel = NewLabel("collectionEachLoop");
+                string incrementLabel = NewLabel("collectionEachInc");
+                string endLabel = NewLabel("collectionEachEnd");
+                _asm.MarkLabel(loopLabel);
+
+                Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, forEachStatement);
+                _asm.JumpIfFalse(inRange, endLabel);
+
+                ArrayElementLValue item = new ArrayElementLValue(this, items, index, arrayType, elementType);
+                Copy(item.Get(true), element);
+
+                _loops.Push(new LoopContext { BreakLabel = endLabel, ContinueLabel = incrementLabel });
+                EmitStatement(forEachStatement.Statement);
+                _loops.Pop();
+
+                _asm.MarkLabel(incrementLabel);
+                Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, forEachStatement), index);
+                _asm.Jump(loopLabel);
+                _asm.MarkLabel(endLabel);
+            }
+
+            return true;
+        }
+
         private bool TryEmitForEachDictionaryKeys(ForEachStatementSyntax forEachStatement)
         {
             if (!(forEachStatement.Expression is MemberAccessExpressionSyntax memberAccess))
@@ -422,6 +517,191 @@ namespace BetterUdon.Editor
             return true;
         }
 
+        private bool TryEmitDictionaryCollectionMethod(IMethodSymbol method, InvocationExpressionSyntax invocation,
+            out Slot result)
+        {
+            result = null;
+
+            if (!(invocation.Expression is MemberAccessExpressionSyntax memberAccess))
+                return false;
+
+            ITypeSymbol collectionType = GetType(memberAccess.Expression);
+            if (!TryGetDictionaryCollectionTypes(collectionType, out ITypeSymbol keyType, out ITypeSymbol valueType,
+                    out bool keys))
+            {
+                if (!TryGetDictionaryCollectionTypes(method.ContainingType, out keyType, out valueType, out keys))
+                    return false;
+            }
+
+            if (method.Name != "Contains" && method.Name != "ToArray" && method.Name != "CopyTo")
+                return false;
+
+            Slot collection = EmitExpression(memberAccess.Expression);
+            if (collection == null)
+                return false;
+
+            Slot dictionary = DictionaryOfCollection(collection);
+            ITypeSymbol elementType = keys ? keyType : valueType;
+            ITypeSymbol arrayType = MakeArrayType(elementType);
+
+            switch (method.Name)
+            {
+                case "Contains":
+                {
+                    Slot value = ConvertTo(EmitExpression(invocation.ArgumentList.Arguments[0].Expression), elementType);
+                    result = NewSlot(_boolType, "collectionContains");
+
+                    if (keys)
+                    {
+                        Slot index = EmitDictionaryFindIndex(dictionary, keyType, value, invocation);
+                        Copy(EmitBinaryOperator(index, IntConstant(0), _intType, "op_GreaterThanOrEqual",
+                            _boolType, invocation), result);
+                        return true;
+                    }
+
+                    Slot array = DictionaryValues(dictionary);
+                    Slot count = DictionaryCount(dictionary);
+                    Slot indexValue = NewSlot(_intType, "i");
+                    Copy(IntConstant(0), indexValue);
+                    Copy(ConstantSlot(_boolType, false), result);
+
+                    string loopLabel = NewLabel("valuesContainsLoop");
+                    string endLabel = NewLabel("valuesContainsEnd");
+                    _asm.MarkLabel(loopLabel);
+                    Slot inRange = EmitBinaryOperator(indexValue, count, _intType, "op_LessThan", _boolType, invocation);
+                    _asm.JumpIfFalse(inRange, endLabel);
+
+                    ArrayElementLValue element = new ArrayElementLValue(this, array, indexValue, arrayType, elementType);
+                    Slot equal = EmitValueEquality(element.Get(true), value, elementType, invocation);
+                    string nextLabel = NewLabel("valuesContainsNext");
+                    _asm.JumpIfFalse(equal, nextLabel);
+                    Copy(ConstantSlot(_boolType, true), result);
+                    _asm.Jump(endLabel);
+                    _asm.MarkLabel(nextLabel);
+                    Copy(EmitBinaryOperator(indexValue, IntConstant(1), _intType, "op_Addition", _intType, invocation),
+                        indexValue);
+                    _asm.Jump(loopLabel);
+                    _asm.MarkLabel(endLabel);
+                    return true;
+                }
+
+                case "ToArray":
+                case "CopyTo":
+                {
+                    Slot source = keys ? DictionaryKeys(dictionary) : DictionaryValues(dictionary);
+                    Slot count = DictionaryCount(dictionary);
+
+                    if (method.Name == "ToArray")
+                    {
+                        result = NewSlot(arrayType, "collectionArray");
+                        CreateArray(result, arrayType, count);
+                    }
+                    else
+                    {
+                        result = null;
+                        Slot target = EmitExpression(invocation.ArgumentList.Arguments[0].Expression);
+                        Slot offset = ConvertTo(EmitExpression(invocation.ArgumentList.Arguments[1].Expression), _intType);
+                        CopyArrayToOffset(source, target, arrayType, elementType, count, offset, invocation);
+                        return true;
+                    }
+
+                    Slot index = NewSlot(_intType, "i");
+                    Copy(IntConstant(0), index);
+                    string loopLabel = NewLabel("collectionCopyLoop");
+                    string endLabel = NewLabel("collectionCopyEnd");
+                    _asm.MarkLabel(loopLabel);
+                    Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, invocation);
+                    _asm.JumpIfFalse(inRange, endLabel);
+                    ArrayElementLValue sourceElement = new ArrayElementLValue(this, source, index, arrayType, elementType);
+                    ArrayElementLValue targetElement = new ArrayElementLValue(this, result, index, arrayType, elementType);
+                    targetElement.Set(sourceElement.Get(true));
+                    Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, invocation), index);
+                    _asm.Jump(loopLabel);
+                    _asm.MarkLabel(endLabel);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void CopyArrayToOffset(Slot source, Slot target, ITypeSymbol arrayType, ITypeSymbol elementType,
+            Slot count, Slot offset, SyntaxNode node)
+        {
+            Slot index = NewSlot(_intType, "i");
+            Copy(IntConstant(0), index);
+            string loopLabel = NewLabel("copyToLoop");
+            string endLabel = NewLabel("copyToEnd");
+            _asm.MarkLabel(loopLabel);
+            Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, node);
+            _asm.JumpIfFalse(inRange, endLabel);
+
+            Slot targetIndex = EmitBinaryOperator(offset, index, _intType, "op_Addition", _intType, node);
+            ArrayElementLValue sourceElement = new ArrayElementLValue(this, source, index, arrayType, elementType);
+            ArrayElementLValue targetElement = new ArrayElementLValue(this, target, targetIndex, arrayType, elementType);
+            targetElement.Set(sourceElement.Get(true));
+
+            Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, node), index);
+            _asm.Jump(loopLabel);
+            _asm.MarkLabel(endLabel);
+        }
+
+        private void EmitDictionarySetCapacity(Slot dictionary, ITypeSymbol keyType, ITypeSymbol valueType,
+            Slot requestedCapacity)
+        {
+            ITypeSymbol keysType = MakeArrayType(keyType);
+            ITypeSymbol valuesType = MakeArrayType(valueType);
+            Slot count = DictionaryCount(dictionary);
+            Slot capacity = NewSlot(_intType, "capacity");
+            Copy(requestedCapacity, capacity);
+
+            Slot tooSmall = EmitBinaryOperator(capacity, count, _intType, "op_LessThan", _boolType, null);
+            string capacityReady = NewLabel("dictCapacityReady");
+            _asm.JumpIfFalse(tooSmall, capacityReady);
+            Copy(count, capacity);
+            _asm.MarkLabel(capacityReady);
+
+            Slot oldKeys = DictionaryKeys(dictionary);
+            Slot oldValues = DictionaryValues(dictionary);
+            Slot newKeys = NewSlot(keysType, "dictKeysResized");
+            CreateArray(newKeys, keysType, capacity);
+            Slot newValues = NewSlot(valuesType, "dictValuesResized");
+            CreateArray(newValues, valuesType, capacity);
+
+            Slot index = NewSlot(_intType, "i");
+            Copy(IntConstant(0), index);
+            string loopLabel = NewLabel("dictResizeLoop");
+            string endLabel = NewLabel("dictResizeEnd");
+            _asm.MarkLabel(loopLabel);
+            Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, null);
+            _asm.JumpIfFalse(inRange, endLabel);
+
+            ArrayElementLValue sourceKey = new ArrayElementLValue(this, oldKeys, index, keysType, keyType);
+            ArrayElementLValue targetKey = new ArrayElementLValue(this, newKeys, index, keysType, keyType);
+            targetKey.Set(sourceKey.Get(true));
+            ArrayElementLValue sourceValue = new ArrayElementLValue(this, oldValues, index, valuesType, valueType);
+            ArrayElementLValue targetValue = new ArrayElementLValue(this, newValues, index, valuesType, valueType);
+            targetValue.Set(sourceValue.Get(true));
+
+            Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, null), index);
+            _asm.Jump(loopLabel);
+            _asm.MarkLabel(endLabel);
+
+            SetDictionaryKeys(dictionary, newKeys);
+            SetDictionaryValues(dictionary, newValues);
+        }
+
+        private void EmitDictionaryTrimExcess(Slot dictionary, ITypeSymbol keyType, ITypeSymbol valueType)
+        {
+            Slot count = DictionaryCount(dictionary);
+            Slot capacity = ArrayLength(DictionaryKeys(dictionary));
+            Slot hasExcess = EmitBinaryOperator(capacity, count, _intType, "op_GreaterThan", _boolType, null);
+            string endLabel = NewLabel("dictTrimEnd");
+            _asm.JumpIfFalse(hasExcess, endLabel);
+            EmitDictionarySetCapacity(dictionary, keyType, valueType, count);
+            _asm.MarkLabel(endLabel);
+        }
+
         private bool TryEmitDictionaryMethod(IMethodSymbol method, InvocationExpressionSyntax invocation, out Slot result)
         {
             result = null;
@@ -547,15 +827,40 @@ namespace BetterUdon.Editor
                     SetDictionaryCount(dictionary, IntConstant(0));
                     return true;
 
+                case "TrimExcess":
+                    EmitDictionaryTrimExcess(dictionary, keyType, valueType);
+                    return true;
+
                 default:
                     return false;
             }
+        }
+
+        private Slot EmitDictionaryCollectionProperty(SyntaxNode access, IPropertySymbol property, Slot collection)
+        {
+            if (property.Name == "Count")
+                return DictionaryCount(DictionaryOfCollection(collection));
+
+            if (property.Name == "IsReadOnly")
+                return ConstantSlot(_boolType, true);
+
+            AddError($"{property.ContainingType?.Name}.{property.Name} is not supported by the BetterUdon compiler.", access);
+            return NewSlot(property.Type, "bad");
         }
 
         private Slot EmitDictionaryProperty(SyntaxNode access, IPropertySymbol property, Slot dictionary)
         {
             if (property.Name == "Count")
                 return DictionaryCount(dictionary);
+
+            if (property.Name == "Capacity")
+                return ArrayLength(DictionaryKeys(dictionary));
+
+            if (property.Name == "Keys")
+                return CreateDictionaryCollection(dictionary, property.Type, true);
+
+            if (property.Name == "Values")
+                return CreateDictionaryCollection(dictionary, property.Type, false);
 
             AddError($"Dictionary.{property.Name} is not supported by the BetterUdon compiler.", access);
             return NewSlot(property.Type, "bad");

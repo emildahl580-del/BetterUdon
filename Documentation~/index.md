@@ -278,7 +278,7 @@ Every member is emitted inline:
 | Member | Implementation |
 | --- | --- |
 | `Count` | the stored `count` |
-| `Capacity` | the element array's length (read-only) |
+| `Capacity` | the element array's length; settable, with `TrimExcess` to shrink |
 | `Add` | grow if `count == items.Length`, store, increment |
 | `Insert` | grow, shift up from the end, store |
 | `RemoveAt` | shift down, decrement |
@@ -310,8 +310,8 @@ The same compiler-owned collection approach covers the other common containers:
 Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
 use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
 keeps equality correct for primitives and user structs without a custom runtime. Dictionary
-`KeyValuePair` enumeration works through `foreach`; `Keys`/`Values` are still open in
-`Documentation~/aot-expansion.md`.
+`Keys`/`Values` are stored collection values with `Count`, `Contains`, `ToArray`, `CopyTo` and
+`foreach`; `List<T>.Capacity` is settable and all collections support `TrimExcess`.
 
 ---
 
@@ -748,9 +748,10 @@ Some limits remain:
   compile time because Udon cannot construct a generic type at runtime. Constraints that call members
   through an interface use closed-world dispatch.
 - **Collection limits.** `List<T>`, `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` are
-  compiler intrinsics. HashSet/Dictionary use linear scans rather than hashing, dictionary
-  `TryGetValue`/`Keys`/`Values`/`foreach` are still pending, and collection field initialisers must be
-  created in `Start`.
+  compiler intrinsics. HashSet/Dictionary use linear scans rather than hashing. Dictionary
+  `Keys`/`Values` and `List<T>.Capacity`/`TrimExcess` are supported; the Unity profile does not expose
+  `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`. Collection field initialisers must be created in
+  `Start`.
 - **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
   enumerators and `async`/`await` are not implemented yet.
 - **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups, non-capturing and

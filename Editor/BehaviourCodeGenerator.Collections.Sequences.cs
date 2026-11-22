@@ -153,6 +153,10 @@ namespace BetterUdon.Editor
                     result = EmitSequenceToArray(set, elementType, invocation);
                     return true;
 
+                case "TrimExcess":
+                    EmitSequenceTrimExcess(set, elementType);
+                    return true;
+
                 case "CopyTo":
                     return false;
 
@@ -228,15 +232,33 @@ namespace BetterUdon.Editor
                     result = EmitSequenceToArray(collection, elementType, invocation);
                     return true;
 
+                case "TrimExcess":
+                    EmitSequenceTrimExcess(collection, elementType);
+                    return true;
+
                 default:
                     return false;
             }
+        }
+
+        private void EmitSequenceTrimExcess(Slot collection, ITypeSymbol elementType)
+        {
+            Slot count = ListCount(collection);
+            Slot capacity = ArrayLength(ListItems(collection));
+            Slot hasExcess = EmitBinaryOperator(capacity, count, _intType, "op_GreaterThan", _boolType, null);
+            string endLabel = NewLabel("trimEnd");
+            _asm.JumpIfFalse(hasExcess, endLabel);
+            EmitListSetCapacity(collection, elementType, count);
+            _asm.MarkLabel(endLabel);
         }
 
         private Slot EmitSequenceProperty(SyntaxNode access, IPropertySymbol property, Slot collection, ITypeSymbol elementType)
         {
             if (property.Name == "Count")
                 return ListCount(collection);
+
+            if (property.Name == "Capacity")
+                return ArrayLength(ListItems(collection));
 
             AddError($"{property.ContainingType?.Name}.{property.Name} is not supported by the BetterUdon compiler.", access);
             return NewSlot(property.Type, "bad");

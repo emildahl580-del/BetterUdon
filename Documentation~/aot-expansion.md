@@ -30,9 +30,10 @@ Make generic code compile once per concrete instantiation.
 - [~] Constraints that require interface member calls. Numeric and user-struct
       `IComparable<T>.CompareTo` are lowered/inlined; other constrained interface calls are still
       pending.
-- [ ] Deduplication policy: share reference-type instantiations where the representation is
-      already `object`; specialise value-type instantiations.
-- [ ] Code-size guard and diagnostic for pathological instantiation counts.
+- [x] Deduplication policy: reference-type instantiations are not shared; call-site inlining is
+      retained, with a hard code-size guard below.
+- [x] Code-size guard: programs over 20,000 slots or 256 generic instantiations report a compile
+      error.
 - [x] Tests: identity, swap, arrays, nested generic calls, struct arguments/returns,
       multiple instantiations in one behaviour.
 
@@ -71,7 +72,10 @@ Implement the collection library in lowered code, not as a runtime service.
 - [x] `Queue<T>`: enqueue, dequeue, peek, count, contains, to-array, grow.
 - [x] `Stack<T>`: push, pop, peek, count, contains, to-array, grow.
 - [x] `KeyValuePair<K,V>` and dictionary `foreach`.
-- [ ] `Capacity`, `TrimExcess`, constructors with comparer (where meaningful).
+- [x] `Keys`/`Values` as stored collection values with `Count`, `Contains`, `ToArray`, `CopyTo`
+      and local-variable `foreach`.
+- [x] `Capacity` and `TrimExcess` for `List<T>` and `TrimExcess` for the other collections. The
+      Unity profile does not expose `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`.
 - [~] Struct keys and values with member-wise equality/hash. Struct dictionary values, queue/stack elements are verified;
       struct dictionary keys still need a test.
 - [~] Share the existing `List<T>` resize and element-copy paths. Queue/Stack/HashSet share them;

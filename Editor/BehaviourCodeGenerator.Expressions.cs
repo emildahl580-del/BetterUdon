@@ -343,6 +343,9 @@ namespace BetterUdon.Editor
                 if (TryGetDictionaryTypes(property.ContainingType, out _, out _))
                     return EmitDictionaryProperty(memberAccess, property, EmitExpression(receiverSyntax));
 
+                if (TryGetDictionaryCollectionTypes(property.ContainingType, out _, out _, out _))
+                    return EmitDictionaryCollectionProperty(memberAccess, property, EmitExpression(receiverSyntax));
+
                 // Properties that declare their own accessor body are inlined like methods.
                 if (GetBackingField(property) == null && AccessorHasBody(property.GetMethod))
                 {
@@ -1587,6 +1590,40 @@ namespace BetterUdon.Editor
                         if (!property.IsStatic && IsRemoteMemberOf(property))
                         {
                             lvalue = CreateRemotePropertyLValue(property, memberAccess);
+                            return true;
+                        }
+
+                        if (property.Name == "Capacity" &&
+                            TryGetListElementType(property.ContainingType, out ITypeSymbol capacityElementType))
+                        {
+                            Slot capacityList = EmitExpression(memberAccess.Expression);
+                            lvalue = new CallbackLValue(_intType,
+                                clone => ArrayLength(ListItems(capacityList)),
+                                newCapacity => EmitListSetCapacity(capacityList, capacityElementType, newCapacity));
+                            return true;
+                        }
+
+                        if (property.Name == "Capacity" &&
+                            (TryGetQueueElementType(property.ContainingType, out ITypeSymbol sequenceElementType) ||
+                             TryGetStackElementType(property.ContainingType, out sequenceElementType) ||
+                             TryGetHashSetElementType(property.ContainingType, out sequenceElementType)))
+                        {
+                            Slot capacityCollection = EmitExpression(memberAccess.Expression);
+                            lvalue = new CallbackLValue(_intType,
+                                clone => ArrayLength(ListItems(capacityCollection)),
+                                newCapacity => EmitListSetCapacity(capacityCollection, sequenceElementType, newCapacity));
+                            return true;
+                        }
+
+                        if (property.Name == "Capacity" &&
+                            TryGetDictionaryTypes(property.ContainingType, out ITypeSymbol capacityKeyType,
+                                out ITypeSymbol capacityValueType))
+                        {
+                            Slot capacityDictionary = EmitExpression(memberAccess.Expression);
+                            lvalue = new CallbackLValue(_intType,
+                                clone => ArrayLength(DictionaryKeys(capacityDictionary)),
+                                newCapacity => EmitDictionarySetCapacity(capacityDictionary, capacityKeyType,
+                                    capacityValueType, newCapacity));
                             return true;
                         }
 

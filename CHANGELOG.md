@@ -21,8 +21,10 @@
 - User structs implementing `IComparable<T>` can be used with generic `CompareTo` constraints; the
   implementation is inlined.
 - `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` intrinsics, including growth, struct
-  elements/values, string keys, `TryGetValue` and `KeyValuePair` foreach. Dictionary uses linear search
-  for correct member-wise equality.
+  elements/values, string keys, `TryGetValue`, `KeyValuePair` foreach, stored `Keys`/`Values`
+  collections and `TrimExcess`. `List<T>.Capacity` is settable.
+- Generic/code-size guard: programs over 20,000 heap slots or 256 generic instantiations fail with a
+  clear diagnostic instead of silently producing an oversized program.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
 - An `Action`, `Action<T>` and `Func<..., TResult>` delegate subset: method groups and lambdas on

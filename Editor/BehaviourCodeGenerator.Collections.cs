@@ -152,6 +152,54 @@ namespace BetterUdon.Editor
             _asm.MarkLabel(noGrowLabel);
         }
 
+        private void EmitListSetCapacity(Slot list, ITypeSymbol elementType, Slot requestedCapacity)
+        {
+            ITypeSymbol arrayType = MakeArrayType(elementType);
+            Slot count = ListCount(list);
+            Slot capacity = NewSlot(_intType, "capacity");
+            Copy(requestedCapacity, capacity);
+
+            Slot tooSmall = EmitBinaryOperator(capacity, count, _intType, "op_LessThan", _boolType, null);
+            string capacityReady = NewLabel("capacityReady");
+            _asm.JumpIfFalse(tooSmall, capacityReady);
+            Copy(count, capacity);
+            _asm.MarkLabel(capacityReady);
+
+            Slot grown = NewSlot(arrayType, "listResized");
+            CreateArray(grown, arrayType, capacity);
+
+            Slot index = NewSlot(_intType, "i");
+            Copy(IntConstant(0), index);
+            Slot items = ListItems(list);
+            string loopLabel = NewLabel("resizeCopy");
+            string endLabel = NewLabel("resizeEnd");
+            _asm.MarkLabel(loopLabel);
+            Slot inRange = EmitBinaryOperator(index, count, _intType, "op_LessThan", _boolType, null);
+            _asm.JumpIfFalse(inRange, endLabel);
+
+            ArrayElementLValue source = new ArrayElementLValue(this, items, index, arrayType, elementType);
+            ArrayElementLValue target = new ArrayElementLValue(this, grown, index, arrayType, elementType);
+            target.Set(source.Get(true));
+
+            Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, null), index);
+            _asm.Jump(loopLabel);
+            _asm.MarkLabel(endLabel);
+
+            SetListItems(list, grown);
+        }
+
+        private void EmitListTrimExcess(Slot list, ITypeSymbol elementType)
+        {
+            Slot count = ListCount(list);
+            Slot capacity = ArrayLength(ListItems(list));
+            Slot hasExcess = EmitBinaryOperator(capacity, count, _intType, "op_GreaterThan", _boolType, null);
+            string endLabel = NewLabel("trimEnd");
+            _asm.JumpIfFalse(hasExcess, endLabel);
+            EmitListSetCapacity(list, elementType, count);
+            _asm.MarkLabel(endLabel);
+        }
+
+
         private Slot ListElementGet(Slot list, ITypeSymbol elementType, Slot index)
         {
             ITypeSymbol arrayType = MakeArrayType(elementType);
@@ -427,6 +475,10 @@ namespace BetterUdon.Editor
                     SetListCount(list, required);
                     return true;
                 }
+
+                case "TrimExcess":
+                    EmitListTrimExcess(list, elementType);
+                    return true;
 
                 case "ClearCapacity":
                     return false;

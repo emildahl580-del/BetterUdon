@@ -116,11 +116,12 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 
 - **Structs** with real value semantics, constructors, mutating methods, nesting, arrays and
   member-wise `Equals`.
-- **`List<T>`** — `Count`, `Capacity` (read), indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`, `Remove`,
-  `Clear`, `Contains`, `IndexOf`, `ToArray`, `foreach`.
+- **`List<T>`** — `Count`, `Capacity` (get/set), indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`,
+  `Remove`, `Clear`, `Contains`, `IndexOf`, `ToArray`, `TrimExcess`, `foreach`.
 - **Other collections** — `Queue<T>` (`Enqueue`/`Dequeue`/`Peek`), `Stack<T>` (`Push`/`Pop`/`Peek`),
   `HashSet<T>` (`Add`/`Remove`/`Contains`), and `Dictionary<K,V>` (indexer, `Add`, `ContainsKey`,
-  `TryGetValue`, `Remove`, `Count`, `KeyValuePair` foreach) with struct/string keys and values.
+  `TryGetValue`, `Remove`, `Count`, `TrimExcess`, `KeyValuePair` foreach, stored `Keys`/`Values` with
+  `Count`, `Contains`, `ToArray`, `CopyTo` and `foreach`) with struct/string keys and values.
 - **Iterators** — `yield return` and `yield break` lowered to a synchronous state machine for direct
   `foreach` over a local iterator method.
 - **Delegates and events** — `Action`, `Action<T>` and `Func<..., TResult>` method groups and
@@ -186,9 +187,9 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 ## Not supported
 
 Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
-components, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects, `yield` inside
-`try`/`finally`, and dictionary `Keys`/`Values` as values. Capturing closures snapshot their values
-rather than sharing the original variable. These are tracked in `Documentation~/aot-expansion.md`.
+components, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects and `yield` inside
+`try`/`finally`. Capturing closures snapshot their values rather than sharing the original variable.
+These are tracked in `Documentation~/aot-expansion.md`.
 
 ## What's new
 
