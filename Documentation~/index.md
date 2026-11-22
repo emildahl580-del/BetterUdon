@@ -418,6 +418,10 @@ The behaviour's sync mode is set on the backing `UdonBehaviour` when the program
 when it has plain synced variables, continuous when any field asks for interpolation. Programs without
 synced variables are left alone, since `SendCustomNetworkEvent` also needs a sync mode.
 
+Sync mode is a property of the **GameObject**, not of a behaviour: Udon's `SyncMethod` setter applies
+the mode to every `UdonBehaviour` on the object. Several BetterUdon behaviours on one object therefore
+share one mode, and one that needs manual sync next to one that needs continuous will conflict.
+
 #### Choosing the mode
 
 `[BetterUdonBehaviourSyncMode(...)]` forces it, like UdonSharp's attribute of the same name:
