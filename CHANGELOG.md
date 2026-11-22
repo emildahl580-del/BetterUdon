@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+
+- Calling a public, parameterless `void` method on another BetterUdon behaviour (`lever.Pull()`)
+  compiles to `SendCustomEvent` on that behaviour. It is asynchronous, because Udon has no call stack:
+  the method runs on the other behaviour after the caller yields.
+- Cross-behaviour call errors now explain the alternative instead of a generic message: methods that
+  take arguments or return a value say to pass data through public fields.
+
 ## 1.2.0
 
 ### Added

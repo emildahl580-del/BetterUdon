@@ -349,8 +349,40 @@ public class Door : BetterUdonBehaviour
 - **`GetComponent`/`GetComponentInChildren`/`GetComponentInParent` on `this`** cannot find another
   behaviour (a GameObject hosts one BetterUdon behaviour), and the `InChildren`/`InParent` forms are
   rejected for behaviour types because Udon cannot search by behaviour type.
-- **Properties and methods are not reachable.** There is no cross-program call: use a public field
-  for data and `SendCustomEvent` for behaviour.
+- **Properties are not reachable**, and neither are methods that take arguments or return a value:
+  there is no call stack between programs. Use a public field for data and an event for behaviour.
+
+#### Methods
+
+A public, parameterless `void` method on another behaviour is one of its Udon entry points, so a call
+is lowered to `SendCustomEvent`:
+
+```csharp
+public class Door : BetterUdonBehaviour
+{
+    public Lever lever;
+
+    public void Open()
+    {
+        lever.Pull();          // SendCustomEvent("Pull") on the Lever
+    }
+}
+```
+
+The call is **asynchronous**: the body runs on the other behaviour after the caller yields, which is
+Udon's event model. Any state it changes is visible on the next frame.
+
+Arguments and return values cannot cross. Write the input to a public field, raise the event, then
+read the result from a public field:
+
+```csharp
+lever.amount = 3;          // argument
+lever.Pull();              // event
+int uses = lever.uses;     // result, once the Lever has run
+```
+
+Methods that take arguments or return a value produce a compile error that says exactly this, rather
+than generating a call that silently does nothing.
 
 ---
 

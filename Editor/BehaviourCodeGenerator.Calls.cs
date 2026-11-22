@@ -228,9 +228,21 @@ namespace BetterUdon.Editor
             if (isUserMethod)
             {
                 ITypeSymbol containingType = method.ContainingType;
+
                 if (!SymbolEqualityComparer.Default.Equals(containingType, _behaviourType) && containingType.TypeKind != TypeKind.Struct)
                 {
-                    AddError($"'{method.Name}' is declared on another behaviour type. BetterUdon cannot call across behaviours, use SendCustomEvent instead.", invocation);
+                    // A parameterless void method is an Udon event on the other behaviour, so it can be
+                    // raised. Udon has no call stack, so this is fire-and-forget: the body runs on the
+                    // other behaviour after this one yields.
+                    if (DerivesFromBetterUdon(containingType) && CanRaiseAsEvent(method) && instance != null)
+                    {
+                        _asm.Push(instance);
+                        _asm.Push(ConstantSlot(_stringType, method.Name));
+                        Extern($"{UdonReceiverType}.__SendCustomEvent__SystemString__SystemVoid", $"event '{method.Name}'");
+                        return null;
+                    }
+
+                    AddError(DescribeUnsupportedCrossBehaviourCall(method), invocation);
                     return NewSlot(method.ReturnType, "bad");
                 }
 
@@ -269,6 +281,44 @@ namespace BetterUdon.Editor
 
             Extern(signature, $"call to '{method.Name}'");
             return externResult;
+        }
+
+        /// <summary>
+        /// Whether a method on another behaviour is one of its Udon entry points, so it can be raised
+        /// with <c>SendCustomEvent</c>.
+        /// </summary>
+        private static bool CanRaiseAsEvent(IMethodSymbol method)
+        {
+            if (method.IsStatic || method.IsGenericMethod || method.Parameters.Length != 0 || !method.ReturnsVoid)
+                return false;
+
+            if (method.DeclaredAccessibility != Accessibility.Public)
+                return false;
+
+            // Event methods are dispatched under their lowered name (_update, _interact, ...), not the
+            // C# name, so raising them by name would not reach anything.
+            return !UdonRegistry.Instance.TryGetEvent(method.Name, out _);
+        }
+
+        private static string DescribeUnsupportedCrossBehaviourCall(IMethodSymbol method)
+        {
+            if (method.IsStatic)
+                return $"'{method.Name}' is static; static methods are not exposed across behaviours.";
+
+            if (method.Parameters.Length > 0)
+            {
+                return $"'{method.Name}' takes arguments. Udon cannot pass arguments between behaviours: " +
+                       "write the value to a public field first, then raise the event.";
+            }
+
+            if (!method.ReturnsVoid)
+            {
+                return $"'{method.Name}' returns a value. Udon cannot return values between behaviours: " +
+                       "raise an event and read the result from a public field.";
+            }
+
+            return $"'{method.Name}' is not an Udon entry point. Only public, parameterless void methods " +
+                   "can be raised across behaviours.";
         }
 
         private static int IndexOfParameter(IMethodSymbol method, string name)
