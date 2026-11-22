@@ -109,7 +109,18 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   `other.Total` work synchronously; the method body is inlined against the other behaviour, so
   arguments, return values and private state all behave like C#.
 - **Network sync** — `[BetterUdonSynced]` on fields, including user structs and struct arrays (the
-  compiler generates the synced mirrors and the serialisation entry points).
+  compiler generates the synced mirrors and the serialisation entry points), with interpolation modes
+  and `[BetterUdonSynced(OnChange = nameof(...))]` callbacks.
+- **Network events** — `SendCustomNetworkEvent`, local or remote, with `[NetworkCallable]` entry
+  points taking up to eight parameters.
+- **`[BetterUdonBehaviourSyncMode]`** — `Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`,
+  validated the way UdonSharp validates them.
+- **Recursion** — `[RecursiveMethod]` compiles a method once and keeps a growable frame stack at
+  runtime, so direct self-recursion with arguments and return values works at practical depths.
+- **Several behaviours on one GameObject** — including two components of the same type. Each proxy
+  gets its own backing `UdonBehaviour`, and typed `GetComponent<T>()` returns the matching one.
+- **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
+- **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
 
 ### UdonSharp compatibility
 
@@ -122,18 +133,32 @@ Everything UdonSharp can express is covered, plus the language features above:
 | `[UdonBehaviourSyncMode]` | `[BetterUdonBehaviourSyncMode]` (`Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`) |
 | `SendCustomNetworkEvent` | `SendCustomNetworkEvent`, including `[NetworkCallable]` parameters |
 | `[RecursiveMethod]` | `[RecursiveMethod]` (manual frame stack, `JUMP_INDIRECT` return) |
-| Several behaviours on one GameObject | supported, one backing `UdonBehaviour` each |
+| Several behaviours on one GameObject | supported, one backing `UdonBehaviour` each, duplicates included |
 | Udon events (`OnPlayerJoined`, …) | any `Event_*` node, matched by method name |
 | `SendCustomEvent`, delayed variants, `Get`/`SetProgramVariable`, `RequestSerialization`, `Networking.*` | ✓ |
 | Inheritance between behaviours | ✓ (fields of base behaviours become variables) |
 
-Remaining differences: recursion is limited to direct self-recursion between `[RecursiveMethod]`
+Remaining differences: recursion is limited to direct self-recursion inside `[RecursiveMethod]`
 methods (no mutual recursion), and `#if UDONSHARP` dual-compilation is not emulated.
+
+### Sync mode is per GameObject
+
+Udon stores the sync mode on the GameObject, not on the behaviour: setting it applies to every
+`UdonBehaviour` there. Several BetterUdon behaviours on one object therefore share one mode, so a
+`Manual` behaviour next to a `Continuous` one needs separate GameObjects.
 
 ## Not supported
 
-Recursion (Udon has no call stack), open generics at runtime, delegates and lambdas, `try`/`catch`,
-`async`, `yield`, user generic methods and `Dictionary<K,V>` (both feasible, not implemented).
+Mutual recursion (direct self-recursion works via `[RecursiveMethod]`), open generics at runtime,
+delegates and lambdas, `try`/`catch`, `async`, `yield`, user generic methods and `Dictionary<K,V>`
+(both feasible, not implemented).
+
+## What's new
+
+**1.6.1** is a bug sweep: array `foreach`, base-behaviour method calls, recursive methods returning a
+struct, frame-stack growth and backing selection for two components of the same type on one object are
+all fixed. **1.6.0** added `[RecursiveMethod]`, several behaviours per GameObject and
+`[NetworkCallable]` parameters. See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## Documentation
 
