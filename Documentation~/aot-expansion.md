@@ -98,7 +98,8 @@ Reassess what pure AOT can still cover once the above land:
 - [ ] `using`/`IDisposable` lowering.
 - [~] Pattern matching breadth. Switch expressions with constant/relational/`when`/discard patterns
       and type/declaration patterns work; property and list patterns are still pending.
-- [ ] `record` structs and generated equality/`ToString`.
+- [ ] `record` structs and generated equality/`ToString`. `record struct` requires C# 10, while this
+      project currently compiles at C# 9.0 (CS8773), so this is blocked by the language version.
 - [ ] More BCL helpers that map to existing externs or lowered code.
 - [ ] Document which remaining features genuinely require an interpreter or native runtime.
 
