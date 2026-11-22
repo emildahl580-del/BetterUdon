@@ -8,6 +8,11 @@
   of whether the target is the same block, so cycles such as `A → B → A` unwind correctly. Parameter
   and return slots are allocated before any block is emitted, so a forward call to a recursive method
   whose block has not been compiled yet still resolves.
+- Monomorphised generic methods and generic structs. Type arguments are substituted through inlined
+  bodies, slots, arrays, defaults, `typeof`, constructors and nested generic calls; `Box<int>` and
+  `Box<string>` get independent layouts.
+- Closed-world dispatch for `virtual`, `override`, `abstract` and interface method calls. Receiver
+  type markers select a branch that inlines the concrete implementation, keeping calls synchronous.
 
 ## 1.6.1
 

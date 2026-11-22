@@ -441,6 +441,14 @@ namespace BetterUdon.Editor
                 }
             }
 
+            // A constructed generic struct exposes fields that are distinct symbols from the ones the
+            // generic method body was bound against. Layout order is still the same.
+            foreach (IFieldSymbol candidate in Fields)
+            {
+                if (candidate.Name == field.Name)
+                    return _indices[candidate];
+            }
+
             return -1;
         }
 

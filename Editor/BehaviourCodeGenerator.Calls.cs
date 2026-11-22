@@ -172,7 +172,7 @@ namespace BetterUdon.Editor
                         continue;
                     }
 
-                    Slot local = DeclareLocal(declaredLocal, declaredLocal.Type, declaredLocal.Name);
+                    Slot local = DeclareLocal(declaredLocal, Substitute(declaredLocal.Type), declaredLocal.Name);
                     bound[target] = local;
                     refTargets[target] = new SlotLValue(this, local);
                     continue;
@@ -205,7 +205,7 @@ namespace BetterUdon.Editor
 
                 IParameterSymbol parameter = method.Parameters[i];
 
-                if (parameter.IsParams && parameter.Type is IArrayTypeSymbol paramsArrayType)
+                if (parameter.IsParams && Substitute(parameter.Type) is IArrayTypeSymbol paramsArrayType)
                 {
                     bound[i] = PackParams(invocation, paramsStartArgument >= 0 ? paramsStartArgument : invocation.ArgumentList.Arguments.Count, paramsArrayType);
                     continue;
@@ -213,18 +213,21 @@ namespace BetterUdon.Editor
 
                 if (parameter.HasExplicitDefaultValue)
                 {
-                    bound[i] = EmitConstant(null, parameter.ExplicitDefaultValue, parameter.Type);
+                    bound[i] = EmitConstant(null, parameter.ExplicitDefaultValue, Substitute(parameter.Type));
                     continue;
                 }
 
                 AddError($"Missing argument for parameter '{parameter.Name}' of '{method.Name}'.", invocation);
-                bound[i] = EmitDefaultValueSlot(parameter.Type);
+                bound[i] = EmitDefaultValueSlot(Substitute(parameter.Type));
             }
 
             arguments.AddRange(bound);
 
             if (method.ReducedFrom != null && instance != null)
                 arguments.Insert(0, instance);
+
+            if (NeedsClosedWorldDispatch(method, invocation))
+                return EmitClosedWorldDispatch(method, instance, arguments, invocation);
 
             if (isUserMethod && IsRecursiveMethod(method))
             {
@@ -666,70 +669,83 @@ namespace BetterUdon.Editor
         private Slot InlineMethodCore(IMethodSymbol method, Slot instance, List<Slot> arguments, SyntaxNode node, out List<Slot> parameterSlots)
         {
             parameterSlots = null;
-            if (method.IsGenericMethod)
+
+            PushTypeParameterMap(method);
+
+            try
             {
-                AddError($"Generic methods are not supported by the BetterUdon compiler ('{method.Name}').", node);
-                return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
-            }
-
-            if (method.DeclaringSyntaxReferences.Length == 0)
-            {
-                AddError($"'{method.Name}' has no source code available to inline.", node);
-                return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
-            }
-
-            if (_methodsInProgress.Contains(method))
-            {
-                AddError($"'{method.Name}' is recursive. Udon has no call stack, so recursion is not supported.", node);
-                return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
-            }
-
-            Slot result = method.ReturnsVoid ? null : NewSlot(method.ReturnType, "ret");
-            string endLabel = NewLabel("callEnd");
-
-            Slot previousThis = _thisSlot;
-            bool previousThisIsStruct = _thisIsStruct;
-
-            _methodsInProgress.Add(method);
-
-            using (PushScope())
-            {
-                parameterSlots = new List<Slot>(method.Parameters.Length);
-
-                for (int i = 0; i < method.Parameters.Length; i++)
+                if (method.DeclaringSyntaxReferences.Length == 0)
                 {
-                    IParameterSymbol parameter = method.Parameters[i];
-                    Slot parameterSlot = DeclareLocal(parameter, parameter.Type, parameter.Name);
-                    parameterSlots.Add(parameterSlot);
-
-                    // Parameters inside an inlined method can be assigned to, so they need a private copy.
-                    if (i < arguments.Count)
-                        Copy(ConvertTo(arguments[i], parameter.Type), parameterSlot);
-                    else
-                        EmitDefaultValue(parameterSlot, parameter.Type);
+                    AddError($"'{method.Name}' has no source code available to inline.", node);
+                    return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
                 }
 
-                if (instance != null)
+                if (_methodsInProgress.Contains(method))
                 {
-                    _thisSlot = instance;
-                    _thisIsStruct = UdonTypeSystem.IsUserStruct(method.ContainingType);
-                }
-                else if (_thisIsStruct && method.IsStatic)
-                {
-                    _thisIsStruct = false;
+                    AddError($"'{method.Name}' is recursive. Mark it with [RecursiveMethod] so it can be compiled " +
+                             "as a callable block.", node);
+                    return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
                 }
 
-                ReturnContext returnContext = new ReturnContext { ReturnSlot = result, EndLabel = endLabel };
-                EmitMethodBody(method, returnContext);
+                Slot result = method.ReturnsVoid ? null : NewSlot(method.ReturnType, "ret");
+                string endLabel = NewLabel("callEnd");
 
-                _thisSlot = previousThis;
-                _thisIsStruct = previousThisIsStruct;
+                Slot previousThis = _thisSlot;
+                bool previousThisIsStruct = _thisIsStruct;
+
+                _methodsInProgress.Add(method);
+
+                try
+                {
+                    using (PushScope())
+                    {
+                        parameterSlots = new List<Slot>(method.Parameters.Length);
+                        IMethodSymbol parameterDefinition = method.OriginalDefinition ?? method;
+
+                        for (int i = 0; i < method.Parameters.Length; i++)
+                        {
+                            IParameterSymbol parameter = parameterDefinition.Parameters[i];
+                            ITypeSymbol parameterType = Substitute(method.Parameters[i].Type);
+                            Slot parameterSlot = DeclareLocal(parameter, parameterType, parameter.Name);
+                            parameterSlots.Add(parameterSlot);
+
+                            // Parameters inside an inlined method can be assigned to, so they need a private copy.
+                            if (i < arguments.Count)
+                                Copy(ConvertTo(arguments[i], parameterType), parameterSlot);
+                            else
+                                EmitDefaultValue(parameterSlot, parameterType);
+                        }
+
+                        if (instance != null)
+                        {
+                            _thisSlot = instance;
+                            _thisIsStruct = UdonTypeSystem.IsUserStruct(Substitute(method.ContainingType));
+                        }
+                        else if (_thisIsStruct && method.IsStatic)
+                        {
+                            _thisIsStruct = false;
+                        }
+
+                        ReturnContext returnContext = new ReturnContext { ReturnSlot = result, EndLabel = endLabel };
+                        EmitMethodBody(method, returnContext);
+
+                        _thisSlot = previousThis;
+                        _thisIsStruct = previousThisIsStruct;
+                    }
+                }
+                finally
+                {
+                    _methodsInProgress.Remove(method);
+                }
+
+                _asm.MarkLabel(endLabel);
+
+                return result;
             }
-
-            _methodsInProgress.Remove(method);
-            _asm.MarkLabel(endLabel);
-
-            return result;
+            finally
+            {
+                PopTypeParameterMap();
+            }
         }
 
         #endregion
@@ -770,6 +786,15 @@ namespace BetterUdon.Editor
                     ApplyInitializer(slot, type, initializer);
 
                 return slot;
+            }
+
+            // new T() / new SomeStruct() with no arguments is the default value, not an extern call.
+            if (type != null && type.IsValueType && arguments.Count == 0 &&
+                (constructor == null || constructor.Parameters.Length == 0))
+            {
+                Slot defaultValue = NewSlot(type, "new");
+                EmitDefaultValue(defaultValue, type);
+                return defaultValue;
             }
 
             Slot result = NewSlot(type, "new");
@@ -948,7 +973,7 @@ namespace BetterUdon.Editor
             {
                 // The type of the whole creation is more reliable than the type reference node: an
                 // unbound identifier yields no symbol while the expression still has its type.
-                ITypeSymbol type = GetType(objectCreation) ?? GetTypeInfo(objectCreation.Type).Type;
+                ITypeSymbol type = GetType(objectCreation) ?? Substitute(GetTypeInfo(objectCreation.Type).Type);
 
                 if (UdonTypeSystem.IsUserStruct(type))
                     return BuildStaticStruct(type, objectCreation.ArgumentList);

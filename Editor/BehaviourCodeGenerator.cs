@@ -38,6 +38,8 @@ namespace BetterUdon.Editor
         private readonly Stack<ReturnContext> _returns = new Stack<ReturnContext>();
         private readonly HashSet<IMethodSymbol> _methodsInProgress = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
         private readonly HashSet<string> _exportedEntryPoints = new HashSet<string>();
+        private readonly List<Dictionary<ITypeParameterSymbol, ITypeSymbol>> _typeParameterMaps =
+            new List<Dictionary<ITypeParameterSymbol, ITypeSymbol>>();
 
         private Slot _udonThisSlot;
         private Slot _thisSlot;
@@ -596,8 +598,98 @@ namespace BetterUdon.Editor
             return symbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == attributeTypeName);
         }
 
+        /// <summary>
+        /// Replaces type parameters with the concrete arguments of the active generic instantiation.
+        /// Inlined generic method bodies are bound to the generic definition, so every symbol type that
+        /// escapes the body has to be rewritten before it becomes a slot or an extern signature.
+        /// </summary>
+        private ITypeSymbol Substitute(ITypeSymbol type)
+        {
+            if (type == null)
+                return null;
+
+            switch (type)
+            {
+                case ITypeParameterSymbol typeParameter:
+                    for (int i = _typeParameterMaps.Count - 1; i >= 0; i--)
+                    {
+                        if (_typeParameterMaps[i].TryGetValue(typeParameter, out ITypeSymbol replacement))
+                            return replacement;
+                    }
+
+                    return typeParameter;
+
+                case IArrayTypeSymbol array:
+                {
+                    ITypeSymbol element = Substitute(array.ElementType);
+                    if (SymbolEqualityComparer.Default.Equals(element, array.ElementType))
+                        return array;
+
+                    return _model.Compilation.CreateArrayTypeSymbol(element, array.Rank);
+                }
+
+                case INamedTypeSymbol named when named.IsGenericType:
+                {
+                    bool changed = false;
+                    ITypeSymbol[] arguments = new ITypeSymbol[named.TypeArguments.Length];
+
+                    for (int i = 0; i < arguments.Length; i++)
+                    {
+                        arguments[i] = Substitute(named.TypeArguments[i]);
+                        changed |= !SymbolEqualityComparer.Default.Equals(arguments[i], named.TypeArguments[i]);
+                    }
+
+                    if (!changed)
+                        return named;
+
+                    try
+                    {
+                        return named.ConstructedFrom.Construct(arguments);
+                    }
+                    catch
+                    {
+                        return named;
+                    }
+                }
+
+                default:
+                    return type;
+            }
+        }
+
+        private void PushTypeParameterMap(IMethodSymbol method)
+        {
+            Dictionary<ITypeParameterSymbol, ITypeSymbol> map =
+                new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
+
+            if (method.IsGenericMethod)
+            {
+                IMethodSymbol definition = method.ConstructedFrom ?? method;
+
+                for (int i = 0; i < definition.TypeParameters.Length && i < method.TypeArguments.Length; i++)
+                    map[definition.TypeParameters[i]] = Substitute(method.TypeArguments[i]);
+            }
+
+            INamedTypeSymbol containingType = method.ContainingType;
+            if (containingType != null && containingType.IsGenericType)
+            {
+                INamedTypeSymbol definition = containingType.ConstructedFrom ?? containingType;
+
+                for (int i = 0; i < definition.TypeParameters.Length && i < containingType.TypeArguments.Length; i++)
+                    map[definition.TypeParameters[i]] = Substitute(containingType.TypeArguments[i]);
+            }
+
+            _typeParameterMaps.Add(map);
+        }
+
+        private void PopTypeParameterMap()
+        {
+            _typeParameterMaps.RemoveAt(_typeParameterMaps.Count - 1);
+        }
+
         private Slot NewSlot(ITypeSymbol type, string hint = null)
         {
+            type = Substitute(type);
             string name = "__" + UdonTypeSystem.Sanitize(hint ?? "tmp") + "_" + (_slotCounter++);
             return _asm.AddSlot(name, UdonTypeSystem.GetStorageTypeName(type), type);
         }

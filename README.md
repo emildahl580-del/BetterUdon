@@ -140,6 +140,10 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - **Several behaviours on one GameObject** — including two components of the same type. Each proxy
   gets its own backing `UdonBehaviour`, and typed `GetComponent<T>()` returns the matching one.
 - **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
+- **Virtual and interface calls** — closed-world dispatch over the receiver's type marker; each
+  implementation is inlined with the receiver bound, so calls are synchronous.
+- **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
+  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T` and nested generic calls.
 - **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
 
 ### UdonSharp compatibility
@@ -169,8 +173,9 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 
 ## Not supported
 
-Recursion without `[RecursiveMethod]`, open generics at runtime, delegates and lambdas, `try`/`catch`,
-`async`, `yield`, user generic methods and `Dictionary<K,V>` (both feasible, not implemented).
+Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
+components, delegates and lambdas, `try`/`catch`, `async`, `yield`, and `Dictionary<K,V>` plus the
+other collection types (in progress).
 
 ## What's new
 

@@ -321,9 +321,27 @@ and a copy never aliases the element.
 | Cross-behaviour `SendCustomEvent` | extern on the real receiver, not `this` |
 | `base.Method()` | inlined like the behaviour's own methods |
 | `[RecursiveMethod]` | emitted once as a jumpable block (see below) |
+| Generic methods and generic structs | monomorphised per concrete type arguments (see below) |
+| Virtual and interface calls | closed-world type-marker switch that inlines each implementation |
 | User defined enums | lowered to the underlying integer, so `switch`, `==`, casts and `[Flags]` are integer operations |
 | Extern enums (`KeyCode`, `Space`, ...) | keep their real Udon enum type; the registry exposes no operators for them, so compare as `(int)` |
 | Extern struct initialisers | `new Color(...)`, `new Vector3(...)` are evaluated in the editor and baked as values |
+
+### Generics
+
+Generic methods are monomorphised at the call site. The concrete type arguments are substituted into
+the inlined body, so `Identity<int>(7)` and `Identity<string>("x")` become two independent pieces of
+code with `int` and `string` slots, arrays, defaults and extern signatures. Nested calls substitute
+through the outer instantiation (`Pass<T>` calling `Identity<T>` works for every concrete `T`).
+
+Generic structs work the same way: `Box<int>` and `Box<string>` are separate layouts, and a field,
+method or constructor on either layout sees the substituted field types. `default(T)`, `new T()`
+(no-argument value types), `typeof(T)`, `T[]`, `List<T>`, `ref`/`out T` and generic struct arrays are
+covered.
+
+Constraints that only need substitution (`where T : struct`, `class`, `new()`) are accepted. A
+constraint that requires calling a member on `T` through an interface uses the closed-world dispatch
+below. There is no runtime generic construction: every instantiation must be visible to the compiler.
 
 ### Recursion
 
@@ -406,6 +424,49 @@ public class Door : BetterUdonBehaviour
 - **Explicit events remain available.** When the call must be asynchronous (a one-way notification, or
   code that runs on the other behaviour's own schedule), use `SendCustomEvent`; a method call is
   synchronous and runs in the caller's execution.
+
+### Virtual and interface calls
+
+A `virtual`, `override`, `abstract` or interface call on a BetterUdon behaviour is compiled with
+**closed-world dispatch**. The compiler knows every behaviour type in the project, so it emits a
+switch over the receiver's hidden `__betterUdonType` marker. The matching branch inlines that
+implementation with the receiver bound as `this`, so arguments, return values and private fields keep
+working synchronously.
+
+```csharp
+public interface IDamageable
+{
+    void Damage(int amount);
+}
+
+public class Target : BetterUdonBehaviour, IDamageable
+{
+    public int health;
+    public virtual void Damage(int amount) => health -= amount;
+}
+
+public class ArmoredTarget : Target
+{
+    public override void Damage(int amount) => health -= amount / 2;
+}
+
+public class Shooter : BetterUdonBehaviour
+{
+    public Target target;
+
+    public void Fire()
+    {
+        target.Damage(10);              // virtual dispatch
+        IDamageable d = target;         // interface reference to the same backing
+        d.Damage(10);                   // interface dispatch
+    }
+}
+```
+
+`base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch. The
+receiver must be a BetterUdon behaviour; plain classes and structs are not part of the type-marker
+table yet. Virtual properties, indexers and delegates are still open items in
+`Documentation~/aot-expansion.md`.
 
 ---
 
@@ -612,8 +673,10 @@ Some limits remain:
   because the heap has no per-slot type identity and the VM cannot instantiate a generic type.
 - **No delegates or lambdas.** No callable object model exists to attach them to.
 - **No `try` / `catch`, `throw`, `async`, `yield`, `lock`, `unsafe`.**
-- **No user generic methods or generic structs** (yet). The call site knows the type arguments, so
-  monomorphisation is possible; it is a front-end feature that has not been implemented.
+- **Generic limits.** Generic methods and generic structs are monomorphised. Generic classes and
+  generic BetterUdonBehaviour components are not supported, and every instantiation must be visible at
+  compile time because Udon cannot construct a generic type at runtime. Constraints that call members
+  through an interface use closed-world dispatch.
 - **Collections beyond `List<T>`.** `Dictionary<K,V>` is feasible with linear probing but not
   implemented.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**

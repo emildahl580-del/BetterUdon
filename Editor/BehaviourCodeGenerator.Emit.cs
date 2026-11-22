@@ -250,7 +250,7 @@ namespace BetterUdon.Editor
                 return null;
 
             TypeInfo info = GetTypeInfo(expression);
-            return info.Type ?? info.ConvertedType;
+            return Substitute(info.Type ?? info.ConvertedType);
         }
 
         /// <summary>
@@ -295,6 +295,7 @@ namespace BetterUdon.Editor
 
         private StructLayout GetStructLayout(ITypeSymbol type)
         {
+            type = Substitute(type);
             if (_structLayouts.TryGetValue(type, out StructLayout layout))
                 return layout;
 
@@ -686,12 +687,12 @@ namespace BetterUdon.Editor
 
         private void EmitLocalDeclaration(LocalDeclarationStatementSyntax declaration)
         {
-            ITypeSymbol declaredType = GetTypeInfo(declaration.Declaration.Type).Type;
+            ITypeSymbol declaredType = Substitute(GetTypeInfo(declaration.Declaration.Type).Type);
 
             foreach (VariableDeclaratorSyntax declarator in declaration.Declaration.Variables)
             {
                 ILocalSymbol localSymbol = GetDeclaredSymbol(declarator) as ILocalSymbol;
-                ITypeSymbol type = localSymbol?.Type ?? declaredType;
+                ITypeSymbol type = Substitute(localSymbol?.Type ?? declaredType);
 
                 if (localSymbol == null) continue;
                 Slot slot = DeclareLocal(localSymbol, type, declarator.Identifier.ValueText);
@@ -785,7 +786,7 @@ namespace BetterUdon.Editor
                     foreach (VariableDeclaratorSyntax declarator in forStatement.Declaration.Variables)
                     {
                         ILocalSymbol localSymbol = GetDeclaredSymbol(declarator) as ILocalSymbol;
-                        ITypeSymbol type = localSymbol?.Type;
+                        ITypeSymbol type = Substitute(localSymbol?.Type);
 
                         if (localSymbol == null) continue;
                 Slot slot = DeclareLocal(localSymbol, type, declarator.Identifier.ValueText);

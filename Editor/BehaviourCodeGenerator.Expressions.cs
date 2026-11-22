@@ -67,7 +67,7 @@ namespace BetterUdon.Editor
 
             if (expression is DefaultExpressionSyntax defaultExpression)
             {
-                ITypeSymbol defaultType = GetType(defaultExpression) ?? GetTypeInfo(defaultExpression.Type).Type;
+                ITypeSymbol defaultType = GetType(defaultExpression) ?? Substitute(GetTypeInfo(defaultExpression.Type).Type);
                 Slot slot = NewSlot(defaultType, "default");
                 EmitDefaultValue(slot, defaultType);
                 return slot;
@@ -252,10 +252,11 @@ namespace BetterUdon.Editor
                 if (_fieldSlots.TryGetValue(field, out Slot fieldSlot) && IsBehaviourReceiver(receiverSyntax))
                     return MaybeCloneStruct(fieldSlot);
 
-                if (UdonTypeSystem.IsUserStruct(field.ContainingType))
+                if (UdonTypeSystem.IsUserStruct(Substitute(field.ContainingType)))
                 {
-                    Slot container = EmitStructContainer(receiverSyntax, field.ContainingType);
-                    StructLayout layout = GetStructLayout(field.ContainingType);
+                    ITypeSymbol structType = Substitute(field.ContainingType);
+                    Slot container = EmitStructContainer(receiverSyntax, structType);
+                    StructLayout layout = GetStructLayout(structType);
                     int index = layout?.GetIndex(field) ?? -1;
 
                     if (index < 0)
@@ -321,7 +322,7 @@ namespace BetterUdon.Editor
                     return MaybeCloneStruct(InlineMethod(property.GetMethod, accessorInstance, new List<Slot>(), memberAccess));
                 }
 
-                if (UdonTypeSystem.IsUserStruct(property.ContainingType))
+                if (UdonTypeSystem.IsUserStruct(Substitute(property.ContainingType)))
                 {
                     if (!TryGetBackingField(property, out _))
                     {
@@ -330,8 +331,9 @@ namespace BetterUdon.Editor
                     }
 
                     IFieldSymbol backing = GetBackingField(property);
-                    Slot container = EmitStructContainer(receiverSyntax, property.ContainingType);
-                    StructLayout layout = GetStructLayout(property.ContainingType);
+                    ITypeSymbol structType = Substitute(property.ContainingType);
+                    Slot container = EmitStructContainer(receiverSyntax, structType);
+                    StructLayout layout = GetStructLayout(structType);
                     int index = layout?.GetIndex(backing) ?? -1;
 
                     Slot result = NewSlot(property.Type, "prop");
@@ -855,7 +857,7 @@ namespace BetterUdon.Editor
         /// </summary>
         private Slot EmitTypeOf(TypeOfExpressionSyntax typeOf)
         {
-            ITypeSymbol type = GetTypeInfo(typeOf.Type).Type ?? GetSymbolInfo(typeOf.Type).Symbol as ITypeSymbol;
+            ITypeSymbol type = Substitute(GetTypeInfo(typeOf.Type).Type ?? GetSymbolInfo(typeOf.Type).Symbol as ITypeSymbol);
 
             if (type == null)
             {
@@ -1130,15 +1132,16 @@ namespace BetterUdon.Editor
                             return true;
                         }
 
-                        if (UdonTypeSystem.IsUserStruct(field.ContainingType))
+                        if (UdonTypeSystem.IsUserStruct(Substitute(field.ContainingType)))
                         {
-                            StructLayout layout = GetStructLayout(field.ContainingType);
+                            ITypeSymbol structType = Substitute(field.ContainingType);
+                            StructLayout layout = GetStructLayout(structType);
                             int index = layout?.GetIndex(field) ?? -1;
                             if (index < 0)
                                 return false;
 
-                            Slot container = EmitStructContainer(memberAccess.Expression, field.ContainingType);
-                            lvalue = new StructFieldLValue(this, container, index, field.Type);
+                            Slot container = EmitStructContainer(memberAccess.Expression, structType);
+                            lvalue = new StructFieldLValue(this, container, index, Substitute(field.Type));
                             return true;
                         }
 
@@ -1237,19 +1240,20 @@ namespace BetterUdon.Editor
                             return true;
                         }
 
-                        if (UdonTypeSystem.IsUserStruct(property.ContainingType))
+                        if (UdonTypeSystem.IsUserStruct(Substitute(property.ContainingType)))
                         {
                             IFieldSymbol backing = GetBackingField(property);
                             if (backing == null)
                                 return false;
 
-                            StructLayout layout = GetStructLayout(property.ContainingType);
+                            ITypeSymbol structType = Substitute(property.ContainingType);
+                            StructLayout layout = GetStructLayout(structType);
                             int index = layout?.GetIndex(backing) ?? -1;
                             if (index < 0)
                                 return false;
 
-                            Slot container = EmitStructContainer(memberAccess.Expression, property.ContainingType);
-                            lvalue = new StructFieldLValue(this, container, index, property.Type);
+                            Slot container = EmitStructContainer(memberAccess.Expression, structType);
+                            lvalue = new StructFieldLValue(this, container, index, Substitute(property.Type));
                             return true;
                         }
 
@@ -1277,7 +1281,7 @@ namespace BetterUdon.Editor
             if (!_thisIsStruct || _thisSlot?.Type == null)
                 return false;
 
-            if (!SymbolEqualityComparer.Default.Equals(field.ContainingType, _thisSlot.Type))
+            if (!SymbolEqualityComparer.Default.Equals(Substitute(field.ContainingType), _thisSlot.Type))
                 return false;
 
             StructLayout layout = GetStructLayout(_thisSlot.Type);
