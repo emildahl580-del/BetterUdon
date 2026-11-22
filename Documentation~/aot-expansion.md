@@ -43,8 +43,8 @@ Use the fact that all project types are visible at compile time.
       that inlines each implementation against the receiver.
 - [~] Delegates and events represented as target + method ID + closure value; invocation
       dispatches synchronously when the target is known, otherwise through the generated table.
-      Parameterless `System.Action` method groups on this behaviour are working.
-- [ ] Typed delegate parameters and return values (`Action<T>`, `Func<T,R>`).
+      `Action`, `Action<T>` and `Func<...,TReturn>` method groups on this behaviour are working.
+- [x] Typed delegate parameters and return values (`Action<T>`, `Func<T,R>`).
 - [ ] Cross-behaviour delegate targets: synchronous inlining where possible; document the
       asynchronous event boundary when it is not.
 - [ ] Lambdas, closures, multi-subscriber events and `+=`/`-=`.
@@ -53,9 +53,9 @@ Use the fact that all project types are visible at compile time.
 - [x] Virtual/interface properties.
 - [ ] Virtual/interface indexers.
 - [~] Tests: interface dispatch, virtual override, method arguments and return values, virtual property
-      get and set, parameterless Action method groups and null delegates.
-- [ ] Tests: typed delegate args/return, event with multiple subscribers, struct implementation,
-      null target, virtual indexer, lambda/closure.
+      get and set, parameterless and typed Action/Func method groups, null delegates.
+- [ ] Tests: event with multiple subscribers, struct implementation, null target, virtual indexer,
+      lambda/closure, cross-behaviour delegate.
 
 ## 4. Collections
 

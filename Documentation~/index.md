@@ -415,23 +415,23 @@ open items.
 
 ### Delegates
 
-A small delegate subset is available: parameterless `System.Action` values can be assigned method
-groups on the same behaviour and invoked synchronously.
+A small delegate subset is available: `Action`, `Action<T>` and `Func<..., TResult>` values can be
+assigned method groups on the same behaviour and invoked synchronously.
 
 ```csharp
-private Action callback;
+private Func<int, int> transform;
 
-private void Ping() { hits++; }
+private int Double(int value) => value * 2;
 
 public void Run()
 {
-    callback = Ping;
-    callback();       // inlines Ping
+    transform = Double;
+    int result = transform(5);   // inlines Double
 }
 ```
 
 The delegate slot stores a method ID (0 means null); invocation switches on the ID and inlines the
-target. Lambdas, closures, typed delegates (`Action<T>`, `Func<T,R>`), events with `+=`/`-=` and
+target with the exact parameter and return types. Lambdas, closures, events with `+=`/`-=` and
 cross-behaviour delegate targets are still open.
 
 ### Across behaviours
@@ -747,8 +747,9 @@ Some limits remain:
   created in `Start`.
 - **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
   enumerators and `async`/`await` are not implemented yet.
-- **Delegate limits.** Only parameterless `System.Action` method groups on the same behaviour are
-  supported. Typed delegates, lambdas, closures, events and cross-behaviour targets are pending.
+- **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups on the same
+  behaviour are supported. Lambdas, closures, events, multi-subscriber lists and cross-behaviour
+  targets are pending.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**
   `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
   backings and collection fields are real heap variables but are not Unity-serialisable, so they start

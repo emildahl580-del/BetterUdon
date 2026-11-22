@@ -6,8 +6,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace BetterUdon.Editor
 {
     /// <summary>
-    /// A deliberately small delegate subset: <c>System.Action</c> bound to a parameterless method on
-    /// this behaviour. The delegate slot stores a method ID (0 means null); invoking it switches on
+    /// A deliberately small delegate subset: project method groups bound to Action/Func-style delegates
+    /// on this behaviour. The delegate slot stores a method ID (0 means null); invoking it switches on
     /// that ID and inlines the target method. Lambdas, closures, events, multi-subscriber invocation
     /// lists and cross-behaviour delegates are not implemented yet.
     /// </summary>
@@ -17,71 +17,80 @@ namespace BetterUdon.Editor
             new Dictionary<IMethodSymbol, int>(SymbolEqualityComparer.Default);
         private readonly List<IMethodSymbol> _delegateMethods = new List<IMethodSymbol>();
 
-        private static bool IsActionType(ITypeSymbol type)
+        private static bool TryGetDelegateInvoke(ITypeSymbol type, out IMethodSymbol invoke)
         {
-            return type is INamedTypeSymbol named &&
-                   named.TypeKind == TypeKind.Delegate &&
-                   named.ConstructedFrom?.ToDisplayString() == "System.Action";
+            invoke = (type as INamedTypeSymbol)?.DelegateInvokeMethod;
+            return invoke != null;
         }
 
-        private static bool IsActionInvoke(IMethodSymbol method)
+        private static bool IsDelegateInvoke(IMethodSymbol method)
         {
             return method != null &&
                    method.Name == "Invoke" &&
                    method.ContainingType is INamedTypeSymbol named &&
                    named.TypeKind == TypeKind.Delegate &&
-                   named.ConstructedFrom?.ToDisplayString() == "System.Action";
+                   named.DelegateInvokeMethod != null;
         }
 
         private bool TryEmitDelegateAssignment(LValue target, ExpressionSyntax value, SyntaxNode node)
         {
-            if (target == null || !IsActionType(target.Type))
+            if (target == null || !TryGetDelegateInvoke(target.Type, out IMethodSymbol invoke))
                 return false;
 
             if (value.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
                 !(GetSymbolInfo(value).Symbol is IMethodSymbol))
                 return false;
 
-            if (!TryGetDelegateMethod(value, node, out IMethodSymbol method))
+            if (!TryGetDelegateMethod(value, invoke, node, out IMethodSymbol method))
                 return true;
 
-            int id = GetDelegateMethodId(method);
-            Copy(IntConstant(id), target.Get(false));
+            Copy(IntConstant(GetDelegateMethodId(method)), target.Get(false));
             return true;
         }
 
         private bool TryEmitDelegateLocalInitializer(Slot slot, ITypeSymbol type, ExpressionSyntax value, SyntaxNode node)
         {
-            if (!IsActionType(type))
+            if (!TryGetDelegateInvoke(type, out IMethodSymbol invoke))
                 return false;
 
             if (value.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
                 !(GetSymbolInfo(value).Symbol is IMethodSymbol))
                 return false;
 
-            if (!TryGetDelegateMethod(value, node, out IMethodSymbol method))
+            if (!TryGetDelegateMethod(value, invoke, node, out IMethodSymbol method))
                 return true;
 
             Copy(IntConstant(GetDelegateMethodId(method)), slot);
             return true;
         }
 
-        private bool TryGetDelegateMethod(ExpressionSyntax value, SyntaxNode node, out IMethodSymbol method)
+        private bool TryGetDelegateMethod(ExpressionSyntax value, IMethodSymbol invoke, SyntaxNode node,
+            out IMethodSymbol method)
         {
             method = GetSymbolInfo(value).Symbol as IMethodSymbol;
 
             if (method == null)
+                return false;
+
+            if (method.MethodKind != MethodKind.Ordinary || method.IsGenericMethod ||
+                method.Parameters.Length != invoke.Parameters.Length ||
+                !SymbolEqualityComparer.Default.Equals(method.ReturnType, invoke.ReturnType))
             {
-                // null is a valid delegate value; let the normal assignment path handle it.
+                AddError($"Delegate target '{method.Name}' does not match the delegate signature.", node);
                 return false;
             }
 
-            if (method.MethodKind != MethodKind.Ordinary || method.IsGenericMethod ||
-                method.Parameters.Length != 0 || !method.ReturnsVoid)
+            for (int i = 0; i < invoke.Parameters.Length; i++)
             {
-                AddError($"Delegate target '{method.Name}' must be a parameterless, non-generic void method.",
-                    node);
-                return false;
+                IParameterSymbol expected = invoke.Parameters[i];
+                IParameterSymbol actual = method.Parameters[i];
+
+                if (expected.RefKind != RefKind.None || actual.RefKind != RefKind.None ||
+                    !SymbolEqualityComparer.Default.Equals(expected.Type, actual.Type))
+                {
+                    AddError($"Delegate target '{method.Name}' does not match parameter '{expected.Name}'.", node);
+                    return false;
+                }
             }
 
             if (method.IsStatic)
@@ -111,9 +120,16 @@ namespace BetterUdon.Editor
 
         private Slot EmitDelegateInvocation(IMethodSymbol invoke, InvocationExpressionSyntax invocation)
         {
-            if (invoke.Parameters.Length != 0)
+            if (!TryGetDelegateInvoke(invoke.ContainingType, out IMethodSymbol signature))
+                return null;
+
+            List<Slot> arguments = invocation.ArgumentList.Arguments
+                .Select(argument => EmitExpression(argument.Expression))
+                .ToList();
+
+            if (arguments.Count != signature.Parameters.Length)
             {
-                AddError("Only parameterless System.Action delegates are supported so far.", invocation);
+                AddError($"Delegate invocation expects {signature.Parameters.Length} argument(s).", invocation);
                 return null;
             }
 
@@ -128,6 +144,10 @@ namespace BetterUdon.Editor
             Slot id = NewSlot(_intType, "delegateId");
             Copy(receiver, id);
 
+            Slot result = signature.ReturnsVoid ? null : NewSlot(signature.ReturnType, "delegateResult");
+            if (result != null)
+                EmitDefaultValue(result, signature.ReturnType);
+
             string endLabel = NewLabel("delegateEnd");
             string dispatchLabel = NewLabel("delegateDispatch");
 
@@ -138,19 +158,26 @@ namespace BetterUdon.Editor
 
             foreach (IMethodSymbol method in _delegateMethods.ToList())
             {
+                if (method.Parameters.Length != signature.Parameters.Length ||
+                    !SymbolEqualityComparer.Default.Equals(method.ReturnType, signature.ReturnType))
+                    continue;
+
                 Slot matches = EmitBinaryOperator(id, IntConstant(GetDelegateMethodId(method)),
                     _intType, "op_Equality", _boolType, invocation);
                 string nextLabel = NewLabel("delegateNext");
                 _asm.JumpIfFalse(matches, nextLabel);
 
-                InlineMethod(method, method.IsStatic ? null : _thisSlot, new List<Slot>(), invocation);
-                _asm.Jump(endLabel);
+                Slot value = InlineMethod(method, method.IsStatic ? null : _thisSlot, arguments, invocation);
 
+                if (result != null && value != null)
+                    Copy(ConvertTo(value, result.Type), result);
+
+                _asm.Jump(endLabel);
                 _asm.MarkLabel(nextLabel);
             }
 
             _asm.MarkLabel(endLabel);
-            return null;
+            return result;
         }
     }
 }

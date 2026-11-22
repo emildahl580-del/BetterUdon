@@ -78,7 +78,7 @@ namespace BetterUdon.Editor
             if (method.IsGenericMethod && TryEmitGenericUnityMethod(method, invocation, out Slot genericResult))
                 return genericResult;
 
-            if (IsActionInvoke(method))
+            if (IsDelegateInvoke(method))
                 return EmitDelegateInvocation(method, invocation);
 
             if (TryEmitListMethod(method, invocation, out Slot listResult))

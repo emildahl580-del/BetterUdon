@@ -19,9 +19,9 @@
   for correct member-wise equality.
 - Synchronous iterator lowering: `foreach` over a local iterator method compiles `yield return` /
   `yield break` into a resumable state machine with nested loops, arguments, locals and struct elements.
-- A parameterless `System.Action` delegate subset: method groups on this behaviour store a method ID
-  and invoke synchronously through the generated switch. Lambdas, events and typed delegates remain
-  pending.
+- An `Action`, `Action<T>` and `Func<..., TResult>` delegate subset: method groups on this behaviour
+  store a method ID and invoke synchronously through the generated switch. Lambdas, events,
+  multi-subscriber lists and cross-behaviour targets remain pending.
 - Dictionary `KeyValuePair` foreach and `Keys`/`Values` foreach.
 
 ## 1.6.1
