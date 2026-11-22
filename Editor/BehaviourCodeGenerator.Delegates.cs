@@ -49,6 +49,7 @@ namespace BetterUdon.Editor
                         continue;
 
                     Slot slot = _asm.AddSlot(eventSymbol.Name, "SystemObject", eventSymbol.Type);
+                    slot.InitialValue = new object[0];
                     _fieldSlots[eventSymbol] = slot;
                 }
             }

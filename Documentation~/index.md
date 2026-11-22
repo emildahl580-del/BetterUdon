@@ -2,210 +2,198 @@
 
 **Version 2.0.0-alpha.1**
 
----
+BetterUdon compiles C# into ordinary Udon assembly for VRChat worlds. It uses VRChat's assembler and
+runs on the stock Udon VM. There is no BetterUdon runtime, no custom interpreter and no hidden scene
+service: a BetterUdon world is a normal Udon world with a larger language in front of it.
 
-## Abstract
-
-Udon is VRChat's scripting runtime for worlds. It executes a compact bytecode on a heap of
-type-erased values, and its authoring tools are a node graph and UdonSharp, a C#-like transpiler.
-Both share a hard restriction: the language surface is deliberately small. There are no user defined
-value types, no collections, no `ref`/`out` parameters, and no local functions, because the runtime has
-no call stack, no way to describe a user type, and no collection library.
-
-BetterUdon is a compiler that removes much of that restriction without changing the runtime. It
-compiles a larger subset of C# — including structs with real value semantics and `List<T>` — down to
-ordinary Udon assembly, which is then assembled by VRChat's own toolchain and executed by the stock
-Udon VM. Nothing custom runs at world runtime.
-
-This paper describes the runtime model BetterUdon targets, the lowering strategies that make the extra
-language features possible, the compiler's architecture, and the limits that remain.
+This document explains the target runtime, how the compiler lowers C# to it, what the language
+supports, and where the limits still are.
 
 ---
 
-## 1. Motivation
+## 1. Why this compiler exists
 
-UdonSharp is a source translator. It binds C# syntax against a hand written symbol table, validates
-each construct against what Udon can express, and emits assembly text. Its principal limitations come
-from that model:
+UdonSharp is useful precisely because it is restricted. It binds a small C# syntax directly to Udon
+and rejects anything the VM cannot express. The restriction is real in some places, but in many places
+it is a limitation of the transpiler's representation:
 
-| Restriction | Root cause |
-| --- | --- |
-| No user `struct` | The heap has no way to name or allocate a user defined value type |
-| No `List<T>` / `Dictionary<K,V>` | No collection nodes are exposed by the SDK at all |
-| No `ref` / `out` | No call stack; every call is inlined, so aliasing is impossible |
-| No local functions | Same |
-| No `?.` | Not implemented in the binder |
-| Recursion forbidden | No call stack |
+- Udon's heap can hold arbitrary CLR object references, including arrays.
+- Udon's `EXTERN` instruction can call anything registered by the SDK.
+- Udon has `JUMP_INDIRECT`, so a software call/return convention is possible.
+- Udon can express user data as arrays of heap values.
 
-Some of these are genuine runtime limits. Others are limits of the transpiler. BetterUdon is built on
-the observation that **the runtime is more capable than the transpiler assumes**: the heap holds
-arbitrary boxed objects, arrays of any exposed type can be created, and the `EXTERN` opcode can call
-anything the SDK registered. Everything else is a compilation problem.
+BetterUdon starts from those facts. It uses **Roslyn** to understand the project's real C# and lowers a
+much larger language onto the same VM. The result is still stock Udon; the gain is in the compiler.
 
-The second observation is about the front end. UdonSharp binds syntax itself, which means it must
-re-implement overload resolution, conversions and type inference. BetterUdon instead asks **Roslyn**
-for the semantic model of the project's own sources, so the C# compiler does the binding for it.
+### What 2.0 adds
+
+| Area | Before | 2.0 |
+| --- | --- | --- |
+| Value types | User structs | Structs, nesting, arrays, constructors, methods, `Equals` |
+| Collections | `List<T>` | `List`, `Dictionary`, `HashSet`, `Queue`, `Stack`, keys/values, trimming |
+| Generics | None | Generic methods and structs, monomorphised |
+| Recursion | Direct self-recursion | Direct and mutual recursion |
+| Calls | Inlining only | Closed-world virtual/interface dispatch, properties and indexers |
+| Callbacks | None | Delegates, events, lambdas, closures, cross-behaviour targets |
+| Iteration | `foreach` over built-ins | `yield` state machines |
+| Patterns | Basic switch | Type/declaration/property patterns and switch expressions |
+| Tooling | Assembly view | Complexity budget bar and code-size guards |
 
 ---
 
-## 2. The runtime model
-
-Understanding the lowering requires the shape of the target.
+## 2. The runtime we target
 
 ### 2.1 Heap
 
 The Udon heap is a flat array of `(object value, Type type)` pairs. Every variable in a program is an
-index into that array. There are no locals on a call stack: a program's variables *are* its storage.
-Values are type-erased at the ABI boundary — an extern receives heap addresses and casts the boxed
-value to the parameter type.
+index into that array. There are no call-stack locals: a program's heap variables *are* its storage.
 
-Two consequences shape everything else:
+Values cross the ABI by heap address. An extern receives addresses and casts the boxed values to its
+parameter types. A slot's declared type is an initial hint; an assignment can change the runtime type.
+If a value is not castable when an extern runs, the VM halts the behaviour.
 
-1. A slot can hold a reference to any CLR object, including arrays. This is how structs and lists are
-   represented.
-2. A slot's declared type is only an initial value hint. Assignments may change the runtime type, and
-   an extern will fail at runtime if the boxed value is not castable to the expected type.
+Two consequences drive the whole compiler:
 
-### 2.2 Instruction set
+1. A heap slot can hold any CLR object, including arrays. Structs and collections are represented this
+   way.
+2. Copying C# value semantics must be explicit. The heap stores references, so a struct copy is a deep
+   clone of its field array.
 
-The VM is a small stack machine with no call/return:
+### 2.2 Instructions
+
+The VM is a small stack machine with no native call/return:
 
 | Opcode | Operand | Effect |
 | --- | --- | --- |
 | `PUSH` | heap index | push an address |
 | `POP` | — | discard |
-| `COPY` | — | `heap[pop] = heap[pop]` |
-| `JUMP` | address | unconditional |
-| `JUMP_IF_FALSE` | address | pop, branch on `SystemBoolean` |
+| `COPY` | — | copy the value at the popped address |
+| `JUMP` | address | unconditional branch |
+| `JUMP_IF_FALSE` | address | pop and branch on `SystemBoolean` |
 | `JUMP_INDIRECT` | heap index | branch to an address read from the heap |
 | `EXTERN` | heap index | call an SDK function; the operand is rewritten with a cached delegate |
 | `NOP` / `ANNOTATION` | — | padding |
 
-`JUMP, 0xFFFFFFFC` is the idiom for "return": it jumps past the end of the bytecode, which halts the
-invocation.
+`JUMP, 0xFFFFFFFC` means "return": it jumps past the end of the bytecode and halts the invocation.
 
 ### 2.3 Externs
 
-An extern is named by a string of the form
+An extern name has the form:
 
 ```
-SomeUdonTypeName.__MethodName__ParamType1_ParamType2__ReturnType
+SomeUdonType.__Method__ParamType1_ParamType2__ReturnType
 ```
 
-with `Ref` appended to by-reference parameters, `ctor` as the method name for constructors, and
-invisible `SystemType` parameters in place of generic type arguments. The runtime resolves the string
-to a generated wrapper delegate on first execution and caches it.
+`Ref` is appended for by-reference parameters, `ctor` is used for constructors, and generic arguments
+appear as invisible `SystemType` parameters. The runtime resolves the string to a generated wrapper
+and caches it.
 
-This is the single most important fact for extensibility: **anything the SDK registered is callable**,
-and the set is discoverable at compile time through the editor's node definition table.
+The compiler validates every signature against the installed SDK's node registry. A missing extern
+becomes a compile error naming the exact signature instead of a runtime halt.
 
 ### 2.4 Events
 
-An entry point is a `.export`ed code label. The VM invokes one by name, passing arguments through
-named heap symbols (`onPlayerJoinedPlayer`, etc.). Custom events are entry points whose name has no
-leading underscore.
+An entry point is an `.export`ed label. The VM calls it by name and writes arguments into named heap
+symbols such as `onPlayerJoinedPlayer`. Custom events are entry points without a leading underscore.
 
 ---
 
-## 3. Architecture
+## 3. Compiler architecture
 
 ```
 BetterUdonBehaviour (C# subclass)
         │
         ▼
-┌───────────────────────┐
-│ Front end             │  Roslyn: parse all project sources, semantic model,
-│ BetterUdonCompiler    │  find classes deriving from BetterUdonBehaviour
-└──────────┬────────────┘
-           ▼
-┌───────────────────────┐
-│ Lowering              │  expressions, statements, structs, lists, events,
-│ BehaviourCodeGenerator│  method inlining, extern signature construction
-└──────────┬────────────┘
-           ▼
-┌───────────────────────┐
-│ Emission              │  AssemblyBuilder: labels, instruction sizes,
-│ AssemblyBuilder       │  data section, heap size
-└──────────┬────────────┘
-           ▼
-┌───────────────────────┐
-│ Assembly              │  UAssemblyAssembler + fixed size heap factory
-│ BetterUdonAssembler   │
-└──────────┬────────────┘
-           ▼
-   SerializedUdonProgramAsset  →  Udon VM
+┌────────────────────────┐
+│ Front end              │  Roslyn: parse Assets/**, build the semantic model,
+│ BetterUdonCompiler     │  find BetterUdonBehaviour types
+└───────────┬────────────┘
+            ▼
+┌────────────────────────┐
+│ Lowering               │  expressions → slots, statements → labels,
+│ BehaviourCodeGenerator │  structs, collections, generics, calls, events
+└───────────┬────────────┘
+            ▼
+┌────────────────────────┐
+│ Emission               │  AssemblyBuilder: labels, instruction sizes,
+│ AssemblyBuilder        │  data section, heap size
+└───────────┬────────────┘
+            ▼
+┌────────────────────────┐
+│ Assembly               │  UAssemblyAssembler + fixed-size heap factory
+│ BetterUdonAssembler    │
+└───────────┬────────────┘
+            ▼
+   SerializedUdonProgramAsset → stock Udon VM
 ```
 
 ### 3.1 Front end
 
-The compiler builds a `CSharpCompilation` from **every `.cs` file under `Assets/`** (excluding
-`Editor` folders), plus metadata references to every assembly loaded in the editor domain. The
-project has already compiled that code for Unity, so the analysis compiles too — and gets real
-overload resolution, implicit conversions, constant folding and type inference for free.
+The compiler builds a `CSharpCompilation` from every `.cs` file under `Assets/` (excluding `Editor`
+folders) plus metadata references to the loaded editor assemblies. The project has already compiled
+that code for Unity, so Roslyn gives BetterUdon real overload resolution, conversions and type
+inference.
 
-Each class deriving from `BetterUdonBehaviour` is then compiled independently into its own program.
-
-Two details matter:
-
-- **Syntax trees are re-parsed per compile pass.** Roslyn rejects nodes that do not belong to the
-  semantic model's tree, and caching trees across compilations produced exactly that failure. Caching
-  is instead done at the *result* level, keyed by the newest source file timestamp.
-- **Paths are normalised** (`Path.GetFullPath`) and deduplicated, otherwise a file can be parsed twice
-  and its symbols end up pointing at the wrong tree.
+Each class deriving from `BetterUdonBehaviour` is compiled independently. Sources are re-parsed per
+compile pass because Roslyn nodes cannot be moved between trees. Results are cached by the newest
+source timestamp.
 
 ### 3.2 Lowering
 
-The generator is a recursive emitter. Every expression is lowered into a **slot** — a heap variable
-holding its value — and every statement into control flow over labels. There are no registers and no
-expression trees; the emission is direct.
+The generator is a recursive emitter. Every expression becomes a **slot** (a heap variable), and every
+statement becomes control flow over labels.
 
-Key components:
-
-- **Slot allocation.** One slot per field, local, parameter, temporary and constant, with a stable
-  unique name (`__tmp_17`, `__const_3`, `slots`, …).
-- **Lvalue abstraction.** Assignments go through an `LValue` that knows how to read and write a
-  storage location. Concrete kinds: plain slot, array element, struct field, extern member (a Unity
-  property or field accessed through getter/setter externs), callback (a property with its own
-  accessor body), and list element.
-- **Conversions.** `ConvertTo` maps C# implicit and explicit conversions onto `SystemConvert.__ToX__`
-  externs, with reference conversions free and struct copies explicit.
-- **Inlining.** Udon has no call stack, so every user method call — including constructors, local
-  functions and property accessors — is normally expanded at the call site. Methods marked
-  `[RecursiveMethod]` are the exception: they are emitted once as a labelled block and recurse through
-  a manual frame stack (section 6). Unmarked recursion is still a compile error.
-- **Extern construction.** `UdonExternSignatures` builds the signature string from the Roslyn symbol
-  and validates it against Udon's node registry; an unavailable extern becomes a compile error with
-  the exact signature, not a runtime failure.
+- **Slot allocation** — one slot per field, local, parameter, temporary and constant, with stable
+  names (`__tmp_17`, `__const_3`, `slots`, …).
+- **Lvalues** — assignments use an `LValue` abstraction: plain slot, array element, struct field,
+  extern member, callback property or list element.
+- **Conversions** — `ConvertTo` maps implicit and explicit C# conversions to
+  `SystemConvert.__ToX__` externs, with reference conversions free and struct copies explicit.
+- **Inlining** — normal user calls, constructors, local functions and property accessors are expanded
+  at the call site. `[RecursiveMethod]` methods are compiled once as callable blocks.
+- **Extern construction** — `UdonExternSignatures` builds signatures from Roslyn symbols and validates
+  them against the SDK.
+- **Monomorphisation** — generic type arguments are substituted through inlined bodies, slots, arrays,
+  defaults and extern signatures.
 
 ### 3.3 Emission
 
-`AssemblyBuilder` tracks the byte address of every instruction so that jumps can be resolved. The size
-table mirrors the VM's encoding (one word per opcode and per operand):
+`AssemblyBuilder` tracks the byte address of each instruction so jumps can resolve. The size table
+mirrors the VM:
 
 ```
 PUSH 8   POP 4   COPY 4   JUMP 8   JUMP_IF_FALSE 8   EXTERN 8   JUMP_INDIRECT 8
 ```
 
-Labels carry no size; entry points emit `.export name` followed by `name:`.
+Labels and exports add no instruction size. An entry point emits `.export name` followed by `name:`.
 
 ### 3.4 Assembly and heap sizing
 
-`UdonEditorManager.Assemble` uses a fixed default heap, which non-trivial programs overflow. The
-compiler therefore constructs its own `UAssemblyAssembler` with a heap factory sized to
-`slots + uniqueExterns`, mirroring what UdonSharp does.
+`UdonEditorManager.Assemble` uses a fixed default heap that larger programs overflow. BetterUdon builds
+its own `UAssemblyAssembler` with a heap factory sized to the generated slots plus unique externs,
+mirroring UdonSharp's approach.
+
+### 3.5 Validation
+
+Before a program is stored, BetterUdon:
+
+1. Checks every extern against the SDK node registry.
+2. Serializes and deserializes the program with Udon's serializer.
+3. Reports any symbol-table loss as a compile error naming the asset.
+
+The serializer fails softly — it logs a bad value and loses the symbol table — so this round trip is
+required for reliable assets.
 
 ---
 
-## 4. Structs with value semantics
-
-This is the central feature.
+## 4. Value types
 
 ### 4.1 Representation
 
-A user struct is lowered to an `object[]` whose elements are its fields, in declaration order.
+A user struct is lowered to an `object[]` whose elements are its fields in declaration order:
 
 ```csharp
-public struct InventorySlot          //  object[] { itemId, durability, filled }
+public struct InventorySlot          // object[] { itemId, durability, filled }
 {
     public int itemId;
     public float durability;
@@ -213,17 +201,15 @@ public struct InventorySlot          //  object[] { itemId, durability, filled }
 }
 ```
 
-Nested structs are `object[]`s inside `object[]`s. Struct fields of the *behaviour* are ordinary heap
-slots holding a reference to such an array.
-
-Because the representation is an array of boxed values, a struct can hold any field type Udon can
-store: primitives, Unity structs, strings, references and other structs.
+Nested structs are arrays inside arrays. Struct fields of a behaviour are heap slots holding the field
+array. Any field type Udon can store can live inside a struct: primitives, Unity structs, strings,
+references and other structs.
 
 ### 4.2 Copy semantics
 
-The heap stores references, so *every* place C# copies a value must be an explicit deep copy:
+Every C# operation that copies a value performs an explicit deep clone:
 
-| C# operation | Lowering |
+| C# operation | Lowered operation |
 | --- | --- |
 | `b = a` | `b = Clone(a)` |
 | `f(a)` | parameter slot = `Clone(a)` |
@@ -232,171 +218,318 @@ The heap stores references, so *every* place C# copies a value must be an explic
 | `s.field = v` | `Set(s, index, Clone(v))` |
 | `arr[i] = v` | `Set(arr, i, Clone(v))` |
 
-`Clone` allocates a new array and copies each field, recursing for nested structs. Reference-typed
-fields are copied as references, which is correct.
+Reference-typed fields are copied as references, as C# requires.
 
 ### 4.3 Lvalues
 
-The copy rules only apply when a value is *consumed*. Reading a struct as an lvalue — the receiver of
-`a.b.c = x`, or of `list[i].x` — must not copy, or the write would be lost. The lvalue chain therefore
-uses a non-copying read (`Get(clone: false)`), and only the final store copies.
+A write through a struct chain must not copy intermediate values:
 
 ```csharp
 stats.weapon.itemId = 42;
-//  ref := stats            (no copy)
-//  ref := Get(ref, 0)      (no copy: the nested array itself)
-//  Set(ref, 0, 42)
+
+// ref := stats            (no copy)
+// ref := Get(ref, 0)      (no copy: the nested array itself)
+// Set(ref, 0, 42)
 ```
 
-### 4.4 Methods on structs
+The lvalue chain therefore uses non-copying reads. Only the final store copies.
 
-A struct method call binds `this` to the receiver's storage and inlines the body, so mutations to
-`this` fields are visible to the caller — matching C# for a variable receiver. A receiver that is not
-an lvalue (a call result, a property) is evaluated into a temporary first, so the mutation is local,
-again matching C#.
+### 4.4 Struct methods and constructors
 
-Constructors work the same way: allocate the array, fill defaults, then inline the constructor body
-with `this` bound to it.
+A struct method call binds `this` to the receiver's storage and inlines the body, so field mutations
+are visible to the caller when the receiver is a variable. A call on a temporary — a method result or
+a property — operates on a copy, matching C#.
+
+Constructors allocate the field array, fill defaults, and inline the constructor body with `this`
+bound to it.
+
+### 4.5 Equality
+
+A user struct's `Equals` and collection equality are member-wise. `List<MyStruct>.Contains`,
+`IndexOf`, `Remove`, dictionary keys and `HashSet` membership all use the same value comparison.
 
 ---
 
-## 5. `List<T>`
+## 5. Collections
 
-Udon exposes no collection nodes — the node registry contains zero `ListT` definitions. `List<T>` is
-therefore implemented by the compiler itself:
+Udon has no collection nodes. All collections are compiler intrinsics built from plain arrays.
+
+### 5.1 `List<T>`
+
+`List<T>` is a two-element heap object:
 
 ```
-List<T>  →  object[] {  T[] items,  int count  }
+[0] = T[] items
+[1] = int count
 ```
 
-It is a **reference type**: the heap slot holds a reference, assignment aliases, and mutations are
-visible through every reference, exactly like C#. The element array is a real typed array (`int[]`,
-`Vector3[]`, …) or an `object[]` when `T` is a user struct.
-
-Every member is emitted inline:
+It is a reference type: assignment aliases, mutations are visible through every reference, and
+`List<MyStruct>` stores cloned elements.
 
 | Member | Implementation |
 | --- | --- |
-| `Count` | the stored `count` |
-| `Capacity` | the element array's length; settable, with `TrimExcess` to shrink |
-| `Add` | grow if `count == items.Length`, store, increment |
-| `Insert` | grow, shift up from the end, store |
+| `Count` | stored count |
+| `Capacity` | element-array length; settable |
+| `Add` | grow if needed, store, increment |
+| `AddRange` | append an array |
+| `Insert` | grow, shift up, store |
 | `RemoveAt` | shift down, decrement |
 | `Remove` | `IndexOf` then `RemoveAt` |
-| `Contains` / `IndexOf` | linear scan with member-wise struct equality |
-| `Clear` | `count = 0` |
-| `ToArray` | allocate `T[count]`, copy |
-| `AddRange` | append an array |
+| `Contains` / `IndexOf` | linear scan with value equality |
+| `Clear` | count = 0 |
+| `ToArray` | allocate and copy |
+| `TrimExcess` | shrink the backing array to the count |
 | `this[i]` | array element read/write |
-| `foreach` | index loop to the live `count` |
+| `foreach` | index loop over live count |
 
-Growth doubles capacity with a floor of 4 — the same policy as the BCL.
+Growth doubles capacity with a floor of 4, matching the BCL policy.
 
-Value semantics compose: `List<MyStruct>` stores struct references, and element reads/writes clone
-through the normal struct rules, so `list[0].x = 1` needs the usual C# dance (read, modify, write back)
-and a copy never aliases the element.
-
-### Queue, Stack, HashSet and Dictionary
-
-The same compiler-owned collection approach covers the other common containers:
+### 5.2 Other collections
 
 | Type | Representation | Coverage |
 | --- | --- | --- |
-| `Queue<T>` | `[ T[] items, int count ]` | `Enqueue`, `Dequeue`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
-| `Stack<T>` | `[ T[] items, int count ]` | `Push`, `Pop`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
-| `HashSet<T>` | `[ T[] items, int count ]` | `Add`, `Remove`, `Contains`, `Count`, `Clear`, `ToArray` |
-| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `TryGetValue`, `Remove`, `Count`, `Clear`, `TrimExcess`, `Keys`/`Values`, `KeyValuePair` foreach |
+| `Queue<T>` | `[T[] items, int count]` | `Enqueue`, `Dequeue`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray`, `TrimExcess` |
+| `Stack<T>` | `[T[] items, int count]` | `Push`, `Pop`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray`, `TrimExcess` |
+| `HashSet<T>` | `[T[] items, int count]` | `Add`, `Remove`, `Contains`, `Count`, `Clear`, `ToArray`, `TrimExcess` |
+| `Dictionary<K,V>` | `[K[] keys, V[] values, int count]` | indexer, `Add`, `ContainsKey`, `TryGetValue`, `Remove`, `Count`, `Clear`, `TrimExcess`, `KeyValuePair` foreach |
 
-Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
-use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
-keeps equality correct for primitives and user structs without a custom runtime. Dictionary
-`Keys`/`Values` are stored collection values with `Count`, `Contains`, `ToArray`, `CopyTo` and
-`foreach`; `List<T>.Capacity` is settable and all collections support `TrimExcess`.
+Queue dequeue shifts the live elements down; Stack uses the tail as its top. Dictionary and HashSet
+use member-wise equality and a linear scan instead of a hash table. This is slower than the BCL but
+keeps equality correct for primitives, strings and user structs without a runtime service.
+
+### 5.3 Dictionary keys and values
+
+`dictionary.Keys` and `dictionary.Values` are stored wrappers around the dictionary:
+
+```csharp
+Dictionary<int, string> map = new Dictionary<int, string>();
+map[1] = "one";
+map[2] = "two";
+
+Dictionary<int, string>.KeyCollection keys = map.Keys;
+int count = keys.Count;              // 2
+if (keys.Contains(2)) { ... }
+int[] copy = keys.ToArray();
+
+foreach (int key in keys)
+    sum += key;
+```
+
+`Count`, `Contains`, `ToArray`, `CopyTo` and `foreach` are supported for both collections.
+
+### 5.4 Capacity and trimming
+
+`List<T>.Capacity` is settable and preserves live elements. `TrimExcess()` is implemented for `List`,
+`Queue`, `Stack`, `HashSet` and `Dictionary`.
+
+Unity's .NET profile does not expose `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`, so those
+properties cannot be written in source even though the underlying representation has a capacity.
+
+### 5.5 Collection performance
+
+The important cost is not the representation but the generated code. Every list operation is inlined;
+a loop that calls `Add` per element expands code, and `foreach` over a dictionary is linear. The
+inspector complexity bar exists to make that growth visible.
 
 ---
 
-## 6. Other language features
+## 6. Language coverage
 
-| Feature | Strategy |
+### 6.1 Expressions and statements
+
+| Feature | Lowering |
 | --- | --- |
 | `ref` / `out` / `out var` | inline, copy in, copy back after the call |
 | `in` | inline, copy in only |
-| Named / optional / `params` | argument-to-parameter binding, defaults as constants, packing |
-| Local functions | inlined like methods; captures resolve to enclosing slots |
+| Named / optional / `params` | argument-to-parameter binding, constants, packing |
+| Local functions | inlined; captures resolve to enclosing slots |
 | Auto properties | backing field slot |
 | Properties with bodies | accessor bodies inlined on get and set |
-| `?.` | null test plus guarded block; void forms produce no temporary |
+| `?.` | null test and guarded block |
 | `??` / `??=` | control flow |
 | `is null` / `is not null` | equality against an object-typed null constant |
-| `is` type / declaration / property patterns | closed-world type marker plus property reads |
-| `switch` / `when` | equality chain, guard evaluated after the match |
-| Switch expressions | arm tests and a result slot; constant, relational, `when` and discard arms |
-| `?:` | control flow, both branches converted to the result type |
+| `switch` / `when` | equality chain with guard |
+| `?:` | branch and convert both arms to the result type |
 | `nameof(x)` | compile-time string |
-| String interpolation | concatenation with the string `op_Addition` extern |
-| `foreach` over arrays or `List<T>` | index loop, element read per iteration |
+| String interpolation | string `op_Addition` concatenation |
+| `foreach` over arrays / `List<T>` | index loop |
 | `typeof(T)` | `System.Type` heap constant |
-| `GetComponent<T>()` | Udon's `SystemType` overload with an invisible type parameter |
-| Cross-behaviour `SendCustomEvent` | extern on the real receiver, not `this` |
-| `base.Method()` | inlined like the behaviour's own methods |
-| `[RecursiveMethod]` | emitted once as a jumpable block (see below) |
-| Generic methods and generic structs | monomorphised per concrete type arguments (see below) |
-| Virtual and interface calls | closed-world type-marker switch that inlines each implementation |
-| User defined enums | lowered to the underlying integer, so `switch`, `==`, casts and `[Flags]` are integer operations |
-| Extern enums (`KeyCode`, `Space`, ...) | keep their real Udon enum type; the registry exposes no operators for them, so compare as `(int)` |
-| Extern struct initialisers | `new Color(...)`, `new Vector3(...)` are evaluated in the editor and baked as values |
+| `GetComponent<T>()` | Udon `SystemType` overload / marker lookup for behaviours |
+| `base.Method()` | inlined like a local method |
+| `[RecursiveMethod]` | jumpable block with software frames |
+| Generic methods and structs | monomorphised |
+| Virtual and interface calls | closed-world type-marker dispatch |
+| User enums | underlying integer |
+| Extern enums (`KeyCode`, `Space`) | real Udon enum type; compare as `(int)` |
+| Extern struct initialisers | `new Color(...)`, `new Vector3(...)` baked as values |
 
-### Generics
+### 6.2 Functions and properties
 
-Generic methods are monomorphised at the call site. The concrete type arguments are substituted into
-the inlined body, so `Identity<int>(7)` and `Identity<string>("x")` become two independent pieces of
-code with `int` and `string` slots, arrays, defaults and extern signatures. Nested calls substitute
-through the outer instantiation (`Pass<T>` calling `Identity<T>` works for every concrete `T`).
+Local functions are inlined and can capture enclosing locals. Properties work whether they are auto
+properties, have explicit getter/setter bodies, or are expression-bodied. Private setters and accessor
+bodies behave like normal C#.
 
-Generic structs work the same way: `Box<int>` and `Box<string>` are separate layouts, and a field,
-method or constructor on either layout sees the substituted field types. `default(T)`, `new T()`
-(no-argument value types), `typeof(T)`, `T[]`, `List<T>`, `ref`/`out T` and generic struct arrays are
-covered.
+### 6.3 Patterns and switch expressions
 
-Constraints that only need substitution (`where T : struct`, `class`, `new()`) are accepted. Numeric
-`T : IComparable<T>` constraints lower `CompareTo` to direct comparisons; a user struct's
-`IComparable<T>` implementation is inlined. Other constrained interface member calls still need work.
-There is no runtime generic construction: every instantiation must be visible to the compiler.
+`is` supports null, type, declaration and property patterns:
 
-### Recursion
+```csharp
+if (target is Enemy enemy)
+    enemy.Damage(10);
 
-A normal call is inlined, which would expand forever if the method called itself. Marking a method
-`[RecursiveMethod]` changes that: it is emitted once as a labelled block instead of once per call site.
+if (target is Enemy { Health: > 0 })
+    ...
+```
 
-A call pushes a return address onto Udon's evaluation stack and jumps to the block; the block returns
-with `JUMP_INDIRECT`, reading that address back off the stack. Parameters are ordinary slots inside the
-block, so arguments and return values work as usual.
+Property patterns read through the same dispatch/storage paths as ordinary property access. Switch
+expressions support constant, relational, `when` and discard arms:
 
-Re-entering the block would overwrite the slots the outer invocation is still using. Before a
-self-call, the compiler therefore pushes every slot allocated by the current frame onto a manual stack
-(`object[]` plus an `int` address) and restores them after the call returns. Struct slots are cloned
-when saved, so a recursive call cannot mutate its caller's values. The stack starts at 128 entries and
-grows to twice the size a frame needs when it fills up.
+```csharp
+string label = health switch
+{
+    > 75 => "healthy",
+    > 25 => "hurt",
+    _ => "critical",
+};
+```
 
-A recursive method that is also an entry point — a parameterless Udon event, or a public parameterless
-`void` method — gets a small trampoline at that entry point, so the VM or `SendCustomEvent` can start
-it. Direct and mutual recursion are both supported: when a block calls another recursive block, the
-caller's frame is saved on the same stack and restored after the callee returns. The remaining
-restrictions are:
+### 6.4 Enums, types and Unity helpers
 
-- Recursive methods must be declared on the behaviour itself. Calling one on another behaviour is a
-  compile error.
-- No `ref` / `out` / `in` parameters.
-- A Udon event that takes arguments cannot be a `[RecursiveMethod]`; move the recursion into a helper.
+User-defined enums are stored as their underlying integer, so comparisons, casts, `[Flags]` and switch
+work as C# expects. Extern enums keep their Udon enum type but have no operators in the registry, so
+the compiler compares them as `(int)`.
+
+`typeof(T)` produces a real `System.Type` heap constant. `GetComponent<T>()` and its common variants
+work for BetterUdon behaviours and normal Unity component types.
+
+### 6.5 Exceptions and unsupported syntax
+
+There is no `try` / `catch` / `throw`: an exception in the Udon VM halts the behaviour and cannot be
+caught. `lock`, `unsafe`, `async` / `await`, coroutine scheduling and manual `IEnumerator` objects are
+also outside the compiler's model.
+
+---
+
+## 7. Generics
+
+Generic methods and generic structs are monomorphised. The compiler substitutes the concrete type
+arguments into the inlined body and emits a specialised copy:
+
+```csharp
+private T Identity<T>(T value) => value;
+
+int a = Identity(7);
+string b = Identity("hello");
+```
+
+Each call gets its own slots and conversions. `Box<int>` and `Box<string>` are separate struct layouts.
+
+Supported inside generic bodies:
+
+- `default(T)`, `new T()` for value types, `typeof(T)`
+- `T[]` creation and element access
+- `List<T>` and other generic collections
+- `ref` / `out` / `in` parameters
+- nested generic calls, including calls to other generic methods
+- `where T : struct`, `class`, `new()` constraints that only need substitution
+- `IComparable<T>.CompareTo` for numeric types and user structs
+
+There is no runtime generic instantiation. Every concrete instantiation must be visible at compile
+time. Generic classes and generic `BetterUdonBehaviour` components are not supported.
+
+Because every call site can produce a specialised body, generic breadth affects code size. The
+compiler reports an error above 256 generic instantiations in one behaviour, and the inspector bar
+shows the same ratio.
+
+---
+
+## 8. Recursion
+
+Udon has no native call stack. BetterUdon normally assumes a method cannot call itself and inlines it.
+
+`[RecursiveMethod]` changes that:
+
+```csharp
+[RecursiveMethod]
+private int Factorial(int n)
+{
+    if (n <= 1)
+        return 1;
+
+    return n * Factorial(n - 1);
+}
+```
+
+The method is emitted once as a labelled block. A call pushes a return address and jumps to the block;
+the block returns with `JUMP_INDIRECT`. Before a recursive call, the caller's live slots are pushed onto
+a growable heap stack and restored after the call returns.
+
+Both direct and mutual recursion work:
+
+```csharp
+[RecursiveMethod] private bool IsEven(int n) => n == 0 || IsOdd(n - 1);
+[RecursiveMethod] private bool IsOdd(int n) => n != 0 && IsEven(n - 1);
+```
+
+Restrictions:
+
+- recursive methods cannot take `ref` / `out` / `in` parameters;
+- they must be declared on the behaviour itself, not called on another behaviour;
+- Udon events with arguments cannot be recursive; move the recursion into a helper;
 - `[NetworkCallable]` and `[RecursiveMethod]` cannot be combined.
 
-### Iterators
+The frame stack grows to twice the size the current frame needs when it fills up.
 
-A local iterator method can be consumed by `foreach`; the compiler compiles its body into a
-resumable block rather than trying to return an `IEnumerator` object. The state of the enumeration is
-a heap integer, and the method's locals live on the heap, so reaching the next `yield return` jumps
-back to the instruction after the previous one. Nested loops, arguments, locals, struct elements and
-`yield break` are supported.
+---
+
+## 9. Delegates, events and closures
+
+Delegates are represented as an invocation array. Each entry contains a target behaviour, a method ID
+and an optional closure object.
+
+Supported delegate shapes include:
+
+- `System.Action`
+- `System.Action<T>` and other `Action<...>` overloads
+- `System.Func<TResult>` and `System.Func<..., TResult>`
+
+A delegate value can come from a method group or a lambda:
+
+```csharp
+private Action onReady;
+private Func<int, int> transform;
+
+private void Ready() { ... }
+
+private void Configure()
+{
+    onReady = Ready;
+    onReady += () => Debug.Log("ready");
+
+    transform = value => value * 2;
+}
+```
+
+`+=` and `-=` add and remove subscribers. Invocation loops over the entries and inlines each target.
+A captured variable is snapshotted in the closure at delegate creation and written back after the
+invocation; it is not a shared variable alias.
+
+`event` fields use the same representation, so multi-subscriber events work:
+
+```csharp
+public event Action<Item> ItemAdded;
+
+ItemAdded(item);   // safe with zero, one or many subscribers
+```
+
+Cross-behaviour method groups are supported: the entry stores the target behaviour and invokes the
+target body against that receiver.
+
+---
+
+## 10. Iterators
+
+An iterator used directly in `foreach` is compiled into a resumable state machine in the caller:
 
 ```csharp
 private IEnumerable<int> Numbers(int count)
@@ -405,148 +538,108 @@ private IEnumerable<int> Numbers(int count)
         yield return i;
 }
 
-public void Run()
-{
-    foreach (int number in Numbers(4))
-        total += number;
-}
+foreach (int number in Numbers(4))
+    total += number;
 ```
 
-This is intentionally a **synchronous** lowering for direct `foreach` use, not a coroutine scheduler.
-Manual `GetEnumerator`/`MoveNext` objects, `yield` inside `try`/`finally`, and `async`/`await` are still
-open items.
+A state slot records which `yield` was reached. Locals live on the heap, so re-entering the block jumps
+back after the previous yield. Nested loops, arguments, locals, struct elements and `yield break` work.
 
-### Delegates
+This is a synchronous lowering for direct `foreach`. Manual `IEnumerator` objects, coroutine
+scheduling, `yield` inside `try`/`finally`, and `async`/`await` are not supported.
 
-A small delegate subset is available: `Action`, `Action<T>` and `Func<..., TResult>` values can be
-assigned method groups on the same behaviour and invoked synchronously.
+---
 
-```csharp
-private Func<int, int> transform;
+## 11. Inheritance, interfaces and dispatch
 
-private int Double(int value) => value * 2;
+Every BetterUdon behaviour in the project is visible at compile time. A polymorphic call is lowered to
+a switch over the receiver's hidden `__betterUdonType` marker. Each branch inlines the concrete
+implementation against the receiver.
 
-public void Run()
-{
-    transform = Double;
-    int result = transform(5);   // inlines Double
-}
-```
+This covers:
 
-The delegate slot stores an array of entries (`target`, method ID, closure); invocation loops over
-the entries and inlines each target with the exact parameter and return types. `+=` and `-=` add or
-remove subscribers, so `event` fields and multicast delegates work. Non-capturing and capturing
-lambdas and cross-behaviour targets are supported. A closure snapshots captured values at creation
-and writes them back after invocation, which covers normal callback use but is not a shared-variable
-closure identity.
-
-### Across behaviours
-
-Each program owns its heap, so another behaviour's members are reached through the only door Udon
-provides: `GetProgramVariable` and `SetProgramVariable` on its backing `UdonBehaviour`. Field access is
-lowered to those calls; methods are inlined with the other behaviour bound as `this`. Both keep the
-C# shape:
-
-```csharp
-public class Door : BetterUdonBehaviour
-{
-    public Lever lever;              // drag the Lever component in the inspector
-
-    public void Open()
-    {
-        if (!lever.pulled)
-            return;
-
-        lever.uses = lever.uses + 1; // field: read + write the Lever's heap
-        lever.Total = 5;             // auto property
-        int marks = lever.Play(3);   // method: arguments and a return value
-    }
-}
-```
-
-- **Fields** read and write the receiver's heap. Reading a struct copies it; writing a struct stores a
-  copy, so value semantics hold across behaviours.
-- **Methods are inlined**: the body is compiled into the caller with the receiver as `this`, so
-  arguments, return values, nested calls and private fields all work, and the call returns
-  immediately. The body only ever touches the receiver's variables.
-- **Base methods inline as well.** `base.Foo()` and an unqualified call to an inherited method are
-  treated like the behaviour's own methods; base fields are variables of the same program.
-- **Properties** work: an auto property reads/writes its backing variable, a property with accessor
-  bodies is inlined the same way as a method. Indexers cannot cross behaviours.
-- **Accessibility still applies.** From outside a type only its accessible members can be named (C#
-  checks that); inside an inlined body of that type, private fields are reachable because they are
-  heap variables of the receiver. Public fields that BetterUdon does not export (`List<T>`,
-  `[BetterUdonNoExport]`, auto properties) are still reachable through their symbol; any other field
-  is a compile error that names it.
-- **Unity members and events follow `this`.** `transform`, `gameObject`, `enabled`,
-  `SendCustomEvent`, `GetProgramVariable` and `SetProgramVariable` inside an inlined body act on the
-  receiver.
-- **References survive a build.** A public field typed as a BetterUdon behaviour is stored as that
-  behaviour's backing `UdonBehaviour`, because the C# component is removed from a built world.
-- **`GameObject.GetComponent<T>()` works** for BetterUdon behaviours: the lookup is done on the
-  backing `UdonBehaviour` and then verified against a hidden type marker, so a different behaviour on
-  that object yields `null`, exactly like `GetComponent` should.
-- **A GameObject can host several BetterUdon behaviours**, including two components of the same type.
-  Each proxy has its own backing `UdonBehaviour`, and a typed `GetComponent<T>()` scans them and
-  returns the one whose type marker matches (or null).
-- **`GetComponentInChildren`/`InParent`** are rejected for behaviour types because Udon cannot search
-  by behaviour type; pass the `GameObject` and call `GetComponent` on it.
-- **Explicit events remain available.** When the call must be asynchronous (a one-way notification, or
-  code that runs on the other behaviour's own schedule), use `SendCustomEvent`; a method call is
-  synchronous and runs in the caller's execution.
-
-### Virtual and interface calls
-
-A `virtual`, `override`, `abstract` or interface call on a BetterUdon behaviour is compiled with
-**closed-world dispatch**. The compiler knows every behaviour type in the project, so it emits a
-switch over the receiver's hidden `__betterUdonType` marker. The matching branch inlines that
-implementation with the receiver bound as `this`, so arguments, return values and private fields keep
-working synchronously.
+- `virtual`, `override`, `abstract` and interface methods;
+- virtual/interface properties;
+- virtual/interface indexers;
+- `is` and `as` against known behaviour and interface types.
 
 ```csharp
 public interface IDamageable
 {
     void Damage(int amount);
+    int Health { get; }
 }
 
 public class Target : BetterUdonBehaviour, IDamageable
 {
     public int health;
     public virtual void Damage(int amount) => health -= amount;
+    public virtual int Health => health;
 }
 
 public class ArmoredTarget : Target
 {
     public override void Damage(int amount) => health -= amount / 2;
+    public override int Health => health;
 }
+```
 
-public class Shooter : BetterUdonBehaviour
+`base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch.
+
+The receiver must be a BetterUdon behaviour. Plain classes and structs are not part of the type-marker
+table. BCL runtime type tests are outside this closed-world model.
+
+---
+
+## 12. Cross-behaviour calls
+
+A reference to another BetterUdon behaviour behaves like a normal C# reference for the supported member
+kinds. The callee body is inlined with the receiver bound as `this`, so calls are synchronous.
+
+```csharp
+public class Door : BetterUdonBehaviour
 {
-    public Target target;
+    public Lever lever;
 
-    public void Fire()
+    public void Open()
     {
-        target.Damage(10);              // virtual dispatch
-        IDamageable d = target;         // interface reference to the same backing
-        d.Damage(10);                   // interface dispatch
+        if (!lever.pulled)
+            return;
+
+        lever.uses = lever.uses + 1;   // field read/write
+        lever.Total = 5;               // property
+        int marks = lever.Play(3);     // method with argument and return value
+        marks += lever[0];             // indexer
     }
 }
 ```
 
-`base.Damage(...)` is statically bound and is not dispatched. A null receiver runs no branch. Virtual
-and interface properties use the same type-marker switch for their getter and setter. `is` and `as`
-against known BetterUdon types/interfaces use the same marker table; BCL runtime type tests are not
-available. The receiver must be a BetterUdon behaviour; plain classes and structs are not part of the
-type-marker table yet. BCL runtime type tests, struct receivers and cross-behaviour delegate targets are
-still open in `Documentation~/aot-expansion.md`.
+Supported:
+
+- fields, including struct copies across the behaviour boundary;
+- methods with arguments and return values;
+- properties and indexers;
+- private fields and nested calls inside the inlined body;
+- `transform`, `gameObject`, `enabled`, `SendCustomEvent`, `GetProgramVariable` and
+  `SetProgramVariable` resolve against the receiver;
+- typed `GetComponent<T>()` using the hidden type marker.
+
+A call is synchronous because the code is inlined. `SendCustomEvent` remains the asynchronous option
+when the target must run on its own schedule.
+
+`GetComponentInChildren` / `GetComponentInParent` are not supported for behaviour types because Udon
+cannot search by behaviour type; pass the `GameObject` and call `GetComponent` on it.
+
+Several BetterUdon behaviours can live on one GameObject, including two components of the same type.
+Each proxy owns its own backing `UdonBehaviour`.
 
 ---
 
-## 7. Networking
+## 13. Networking
 
-Synced variables use the same mechanism as the rest of Udon: the assembly declares
-`.sync <symbol>, <interpolation>` in the data section, the assembler turns those statements into the
-program's sync metadata table, and the client serialises exactly the heap variables listed there.
+### 13.1 Synced variables
+
+`[BetterUdonSynced]` marks a public field for Udon synchronization:
 
 ```csharp
 public class Door : BetterUdonBehaviour
@@ -556,245 +649,165 @@ public class Door : BetterUdonBehaviour
 
     public void Toggle()
     {
-        TakeOwnership();      // Networking.SetOwner(Networking.LocalPlayer, gameObject)
+        TakeOwnership();
         open = !open;
         RequestSerialization();
     }
 }
 ```
 
-That is the whole script. There are no serialisation callbacks to implement: the compiler generates the
-entry points that pack structs into their mirrors and unpack them, and Udon calls them around the
-network transfer. `OnPreSerialization`, `OnDeserialization(DeserializationResult)` and
-`OnPostSerialization(SerializationResult)` are available when a script wants to observe or adjust the
-values, but overriding them is optional.
+The compiler generates the sync metadata and any entry points needed to pack/unpack structs. You do
+not write serialization callbacks unless you want to observe or adjust values.
 
-The one manual step is the Udon contract itself: in manual sync mode values are sent when the owner
-calls `RequestSerialization()`, after taking ownership.
+Rules:
 
-The compiler enforces the rules the Udon serialiser has:
+- synced fields must be exported public variables; `List<T>`, auto properties and
+  `[BetterUdonNoExport]` fields cannot be synced;
+- the field type must be syncable (`UdonNetworkTypes.CanSync`);
+- synced fields are stored with their precise Udon type, not `SystemObject`;
+- interpolation is requested per field with `BetterUdonSyncMode.Linear` or `Smooth`.
 
-- A synced field must be an exported public variable. `List<T>`, auto properties and
-  `[BetterUdonNoExport]` fields cannot be synced.
-- The field's type must be one Udon can serialise (`UdonNetworkTypes.CanSync`), which excludes
-  `object`, `List<T>` and Unity object references. User structs and struct arrays are accepted: they
-  are flattened automatically (see below).
-- Synced fields are stored as their precise Udon type (`%SystemString`, `%SystemInt32`, ...) instead of
-  the `SystemObject` slot that other reference-typed fields use, because the serialiser works from the
-  symbol type.
-- Interpolation is requested per field, `[BetterUdonSynced(BetterUdonSyncMode.Linear)]` or `Smooth`.
-  It selects **continuous** sync for the whole behaviour, and continuous sync cannot carry arrays, so
-  that combination is a compile error.
+### 13.2 Sync modes
 
-The behaviour's sync mode is set on the backing `UdonBehaviour` when the program is installed: manual
-when it has plain synced variables, continuous when any field asks for interpolation. Programs without
-synced variables are left alone, since `SendCustomNetworkEvent` also needs a sync mode.
-
-Sync mode is a property of the **GameObject**, not of a behaviour: Udon's `SyncMethod` setter applies
-the mode to every `UdonBehaviour` on the object. Several BetterUdon behaviours on one object therefore
-share one mode, and one that needs manual sync next to one that needs continuous will conflict.
-
-#### Choosing the mode
-
-`[BetterUdonBehaviourSyncMode(...)]` forces it, like UdonSharp's attribute of the same name:
-
-```csharp
-[BetterUdonBehaviourSyncMode(BetterUdonBehaviourSyncMode.NoVariableSync)]
-public class Doorbell : BetterUdonBehaviour
-{
-    public void Ring() => SendCustomNetworkEvent(NetworkEventTarget.All, nameof(OnRung));
-    public void OnRung() { }
-}
-```
+`[BetterUdonBehaviourSyncMode]` accepts `Any`, `None`, `NoVariableSync`, `Continuous` and `Manual`,
+with the same validation UdonSharp applies.
 
 | Mode | Effect |
 | --- | --- |
-| `Any` | default: derived from the synced fields |
-| `Manual` | forces manual sync; interpolation is rejected |
+| `Any` | default, derived from synced fields |
+| `Manual` | values sent on `RequestSerialization()`; no interpolation |
 | `Continuous` | forces continuous sync; arrays and structs are rejected |
-| `None` | nothing is synced and network events cannot be sent |
-| `NoVariableSync` | no synced variables, but network events still work |
+| `None` | no sync and no network events |
+| `NoVariableSync` | network events only |
 
-#### Network events
+Sync mode belongs to the **GameObject**, not the behaviour. Udon's `SyncMethod` setter applies to every
+`UdonBehaviour` on the object, so several behaviours on one object share one mode.
 
-`SendCustomNetworkEvent(NetworkEventTarget.All, "Open")` sends an event to the owner (`Owner`) or to
-every player (`All`). This works on any behaviour with a sync mode other than `None`, including
-`NoVariableSync` ones.
+### 13.3 Network events and callables
 
-Network calls can carry up to eight parameters when the receiver marks its entry point
-`[NetworkCallable]`:
+`SendCustomNetworkEvent(NetworkEventTarget.All, "Open")` works on any behaviour with a sync mode other
+than `None`. Parameters are supported on `[NetworkCallable]` entry points:
 
 ```csharp
-[NetworkCallable(30)]                 // max events per second
+[NetworkCallable(30)]
 public void Apply(int amount, string label) { ... }
 
 public void Send() => SendCustomNetworkEvent(NetworkEventTarget.All, nameof(Apply), 9, "net");
 ```
 
-The compiler validates the same restrictions UdonSharp does (public, non-static, void, at most eight
-parameters, no `ref`/`out`, `params` or defaults, no overloads) and publishes the metadata the client
-uses to map arguments to heap variables. Each parameter is a symbol named
-`<Method>_<parameter>__param`; the metadata carries the same names, so the receiving entry point reads
-exactly the values that were sent. Including the method name keeps two callables that reuse a parameter
-name from sharing one heap variable.
+The compiler validates public, non-static, void, at most eight parameters, no `ref`/`out`/`params`/
+defaults, and no overloads. Parameter symbols are named `<Method>_<parameter>__param` and the client
+metadata uses the same names.
 
-#### Reacting to synced values
+### 13.4 Change callbacks
 
-`OnChange` names a parameterless method or a property setter that runs after values arrive, like
-UdonSharp's `FieldChangeCallback`:
+`[BetterUdonSynced(OnChange = nameof(Handler))]` runs a parameterless method or property setter after
+synced values arrive:
 
 ```csharp
 [BetterUdonSynced(OnChange = nameof(OnHealthChanged))] public int health;
 
 private void OnHealthChanged()
 {
-    // health already holds the value that arrived
     UpdateBar();
 }
 ```
 
 The callback runs on `OnDeserialization`, after struct mirrors are unpacked and before the user's
-`OnDeserialization` body. A direct `SetProgramVariable` writes the heap without running it (Udon has no
-property-change hook on the heap).
+`OnDeserialization` body.
 
-`OnPreSerialization`, `OnDeserialization(DeserializationResult)` and
-`OnPostSerialization(SerializationResult)` are ordinary Udon events, so overriding them becomes an
-entry point. None of them are required for sync to work. Note that an owner does not receive its own
-serialisation: `OnDeserialization` only runs for the players that received the data, which the
-editor's single-player ClientSim cannot reproduce.
+### 13.5 Structs and struct arrays
 
-### Structs and struct arrays
-
-A user struct is an `object[]` of its fields on the heap (section 4), and `object[]` is not one of
-Udon's syncable types. BetterUdon therefore flattens the struct itself, so declaring the field is
-enough:
-
-```csharp
-[BetterUdonSynced] public SyncSample sample;
-[BetterUdonSynced] public SyncSample[] samples;
-```
-
-For a `struct` with fields `hits` (int), `seconds` (float) and `nested` (another struct with `active`
-and `position`), the compiler declares hidden synced variables and mirrors the values through them:
+A struct is an `object[]`, which Udon cannot sync directly. BetterUdon flattens it into hidden synced
+scalars:
 
 ```
-__sync_sample_hits                 %SystemInt32            .sync
-__sync_sample_seconds              %SystemSingle           .sync
-__sync_sample_nested_active        %SystemBoolean          .sync
-__sync_sample_nested_position      %UnityEngineVector3     .sync
-
-__sync_samples_length              %SystemInt32            .sync
-__sync_samples_hits                %SystemInt32Array       .sync
-__sync_samples_seconds             %SystemSingleArray      .sync
-__sync_samples_nested_active       %SystemBooleanArray     .sync
-__sync_samples_nested_position     %UnityEngineVector3Array .sync
+__sync_sample_hits              %SystemInt32       .sync
+__sync_sample_seconds           %SystemSingle      .sync
+__sync_sample_nested_active     %SystemBoolean     .sync
+__sync_sample_nested_position   %UnityEngineVector3 .sync
 ```
 
-The struct is packed into the mirrors in a generated `_onPreSerialization` entry point (after any user
-code, and before the client serialises) and unpacked at the top of `_onDeserialization`, before user
-code runs. Both entry points are generated whenever the script does not declare them, so
-`[BetterUdonSynced]` really is all a script needs to write. If a script does declare
-`OnPreSerialization` / `OnDeserialization`, the generated packing is woven around the user code and
-the callbacks see consistent struct values.
+Struct arrays add a synced length plus parallel arrays for each leaf. Packing runs in generated
+`_onPreSerialization`; unpacking runs at the top of `_onDeserialization`. Both are generated when the
+script does not declare them.
 
-Rules the compiler enforces:
-
-- A struct (or struct array) is always **manual** sync: Udon interpolates single values only, so
-  combining a synced struct with `[BetterUdonSynced(BetterUdonSyncMode.Linear)]` is an error.
-- Every leaf field must be a syncable scalar. Nested structs are flattened recursively; a leaf of
-  type `object`, `List<T>`, another array or a Unity object reference is a compile error that names
-  the field (`'BadLeafStruct.bad' has type 'System.Collections.Generic.List<int>', which Udon cannot synchronise.`).
-- A null struct array packs as length 0 and unpacks as an empty array, so a missing assignment is safe.
-- The mirrors are ordinary exported Udon variables, so they are visible in the program asset under
-  **Udon Variables** (collapsed by default) and are stored with the scene. They are compiler output;
-  do not edit them.
+Struct sync is always manual. Every leaf must be a syncable scalar; nested structs are flattened
+recursively. A null struct array packs as length 0 and unpacks as an empty array.
 
 ---
 
-## 8. Validation
+## 14. Editor tooling
 
-Every extern signature is checked against the set of node definitions the installed SDK exposes. This
-turns the most common failure mode — an extern that does not exist — into a compile error that names
-the exact signature, instead of a runtime halt.
+Selecting a BetterUdon behaviour shows:
 
-A compiled program is also serialised and deserialised once, with the same serializer Udon uses to
-store it, before it is written to its asset. The serializer fails *softly*: a value it cannot write
-is logged and the whole symbol table is lost, which only shows up when the scene loads. Checking the
-round trip turns that into a compile error that names the asset.
+- the normal Unity fields;
+- a **BetterUdon** box with **Recompile**, **Copy Assembly** and a link to the program asset;
+- a **Program** box with generated assembly and disassembly;
+- a **complexity bar**.
 
-`Tools > BetterUdon > Run Diagnostics` compiles every behaviour in the project and writes
-`Library/BetterUdonReport.txt` containing the generated assembly, diagnostics, entry points and
-assembled symbol table.
+The complexity bar combines three measurements:
 
-The component inspector also shows a **complexity bar** under the generated program. It fills from
-green through yellow/orange to red as the program approaches BetterUdon's own budgets: 20,000 heap
-slots, 50,000 instruction words and 256 generic instantiations. These are guidance budgets, not hard
-Udon limits; the tooltip/details show the raw counts so a program can be judged without opening the
-assembly.
+| Metric | Guidance budget |
+| --- | ---: |
+| Heap slots | 20,000 |
+| Instruction words | 50,000 |
+| Generic instantiations | 256 |
 
-BetterUdon is developed against an executable specification: the reference project contains behaviour
-suites for language features, structs, networking, cross-behaviour calls and recursion, run inside the
-editor against the real VM. The language and struct suites alone assert 60+ properties.
+It fills from green through yellow/orange to red as the worst ratio grows. Over-budget programs also
+receive a compile-time diagnostic. These are BetterUdon guardrails: Udon uses 32-bit heap/program
+addresses and does not impose the same counts.
 
----
-
-## 9. Limits
-
-Some limits remain:
-
-- **Recursion needs `[RecursiveMethod]`.** A marked method is compiled as a jumpable block with a
-  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Direct and
-  mutual recursion between marked methods are supported. `ref` / `out` / `in` parameters, calling a
-  recursive method on another behaviour, and recursive Udon events with arguments are compile errors.
-  `[NetworkCallable]` cannot be combined with `[RecursiveMethod]` (section 6).
-- **No open generics at runtime.** A `T` cannot escape into a field or a runtime-constructed type,
-  because the heap has no per-slot type identity and the VM cannot instantiate a generic type.
-- **No `try` / `catch`, `throw`, `async`, `lock`, `unsafe`.** `yield` works for direct `foreach` over a
-  local iterator method; manual `IEnumerator` objects, `yield` inside `try`/`finally` and `async`/
-  `await` are out of scope.
-- **Generic limits.** Generic methods and generic structs are monomorphised. Generic classes and
-  generic BetterUdonBehaviour components are not supported, and every instantiation must be visible at
-  compile time because Udon cannot construct a generic type at runtime. Numeric and user-struct
-  `IComparable<T>.CompareTo` constraints are supported; other constrained interface calls are pending.
-- **Collection limits.** `List<T>`, `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` are
-  compiler intrinsics. HashSet/Dictionary use linear scans rather than hashing. Dictionary
-  `Keys`/`Values` and `List<T>.Capacity`/`TrimExcess` are supported; the Unity profile does not expose
-  `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`. Collection field initialisers must be created in
-  `Start`.
-- **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
-  enumerators and `async`/`await` are intentionally out of scope.
-- **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups, non-capturing and
-  capturing lambdas, multicast `+=`/`-=`, multi-subscriber events and cross-behaviour targets are
-  supported. Closures snapshot captured values and write them back after invocation.
-- **Complexity budgets.** BetterUdon reports an error above 20,000 generated heap slots or 256
-  generic instantiations, and the inspector bar adds a 50,000 instruction-word guidance budget. These
-  are compiler guardrails, not hard Udon limits.
-- **Field initialisers must be compile-time constants, and some backings are not serialisable.**
-  `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
-  backings and collection fields are real heap variables but are not Unity-serialisable, so they start
-  at their default value rather than an authored inspector value.
-- **Language-version blockers.** `record struct` needs C# 10 and list patterns need C# 11; this project
-  compiles as C# 9, so those syntaxes are unavailable.
-- **Unity object references are not baked into the program.** A `Renderer` or `UdonBehaviour[]` field
-  is a public variable; the heap starts without it and Udon fills it from the behaviour's public
-  variable table on load. Udon stores programs without an object table, so such values cannot be
-  heap defaults.
-
-Two runtime behaviours are worth knowing when authoring:
-
-- A custom event raised from `Start` is **dropped**: `RunEventAdvanced` returns false while
-  `!_hasDoneStart`.
-- Dispatch is asynchronous; a value read immediately after `SendCustomEvent` still shows the old state.
+`Tools > BetterUdon > Run Diagnostics` compiles every behaviour and writes the assembly, diagnostics,
+entry points and heap values to `Library/BetterUdonReport.txt`.
 
 ---
 
-## 10. Conclusion
+## 15. Validation and testing
 
-The Udon runtime is a general-purpose heap machine with a small instruction set and a registry of
-callable functions. Most of what UdonSharp forbids is not forbidden by that machine — it is absent
-because the transpiler has no representation for it.
+Every extern signature is checked against the installed SDK's node definitions. Every compiled program
+is also serialized and deserialized once with Udon's serializer before it is stored. That turns the
+serializer's silent symbol-table loss into a compile error.
 
-BetterUdon shows that a compiler with a real semantic front end and a deliberate lowering strategy can
-support user defined value types with correct copy semantics, generic container types implemented in
-the target language, and a broad slice of modern C#, while still producing programs that the stock VM
-executes unmodified.
+BetterUdon is developed against an executable specification: language, struct, networking,
+cross-behaviour, recursion, collection, iterator, delegate and pattern suites run inside the editor
+against the real VM.
+
+---
+
+## 16. Limits
+
+BetterUdon cannot add capabilities the runtime lacks.
+
+| Limit | Reason |
+| --- | --- |
+| No `try` / `catch` / `throw` | The VM halts on an exception and has no unwinding |
+| No `async` / `await` / coroutines / manual `IEnumerator` | No scheduler or coroutine runtime is provided |
+| No runtime generic construction | Udon cannot instantiate a generic type at runtime |
+| No generic classes or generic behaviour components | Unity component types cannot be generic |
+| No `lock`, `unsafe`, threads or native code | Not exposed by Udon |
+| No `record struct` | Requires C# 10; the project compiles as C# 9 |
+| No list patterns | Require C# 11; the project compiles as C# 9 |
+| Closure identity is snapshot-based | Captures copy values rather than sharing a variable cell |
+| BCL surface is limited | Only SDK externs and implemented intrinsics are callable |
+| No open-world type checks | Dispatch and `is`/`as` use the project's closed-world type table |
+
+Additional authoring notes:
+
+- field initialisers must be compile-time constants; create collections in `Start`;
+- auto property and collection backings are not Unity-serializable;
+- Unity object references are not baked into program assets; Udon fills them from public variables;
+- a custom event raised from `Start` is dropped until `Start` completes;
+- `SendCustomEvent` dispatch is asynchronous.
+
+---
+
+## 17. Conclusion
+
+The Udon VM is a capable heap machine with a small instruction set and a registry of callable
+functions. Most of what UdonSharp forbids is not forbidden by that machine; it is absent because the
+transpiler has no representation for it.
+
+BetterUdon shows that a real semantic front end and deliberate lowering can support value types,
+generic containers, recursion, delegates, iterators, pattern matching and synchronous cross-behaviour
+calls while still producing stock Udon programs.

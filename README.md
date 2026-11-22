@@ -1,224 +1,338 @@
 # BetterUdon
 
-A C# to Udon compiler for VRChat worlds, with user defined structs, `List<T>` and more.
+### Write C#. Run Udon.
 
-UdonSharp is deliberately limited: no structs, no collections, no `ref`/`out`. BetterUdon compiles a
-larger slice of C# into ordinary Udon assembly, assembled by VRChat's own toolchain and executed by the
-stock Udon VM — nothing custom runs at world runtime.
+BetterUdon is a C#-to-Udon compiler for VRChat worlds. It targets the stock Udon VM, uses VRChat's
+own assembler, and adds none of its own runtime code. You write the C# you already know; BetterUdon
+turns it into ordinary Udon assembly and the world runs it exactly like any other Udon program.
+
+The interesting part is what you no longer have to work around. UdonSharp is a deliberately small
+language: no user-defined value types, no collections, no generics, no recursion, no delegates, no
+iterators, and no synchronous cross-behaviour calls. BetterUdon compiles a much larger slice of C#.
+
+## At a glance
+
+- **Structs with real value semantics**: constructors, fields, mutating methods, nesting, arrays and
+  member-wise equality.
+- **Collections**: `List<T>`, `Dictionary<K,V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>`, `KeyValuePair`,
+  `Keys`/`Values`, `foreach`, capacity and `TrimExcess`.
+- **Generics**: generic methods and generic structs, monomorphised per instantiation, including
+  `default(T)`, `new T()`, `typeof(T)`, `T[]` and `ref`/`out T`.
+- **Recursion**: direct and mutual recursion through `[RecursiveMethod]`, with arguments, return values
+  and a growable runtime frame stack.
+- **C# call semantics**: `ref`, `out`, `in`, `out var`, named and optional arguments, `params`, local
+  functions with captures.
+- **Properties**: auto properties, private setters, expression-bodied properties and properties with
+  explicit getter/setter bodies.
+- **Delegates and events**: `Action`, `Action<T>`, `Func<..., TResult>`, method groups, capturing
+  lambdas, `+=`/`-=`, multicast events and cross-behaviour targets.
+- **Iterators**: `yield return` and `yield break`, lowered to a resumable state machine.
+- **Interfaces and inheritance**: virtual, override, abstract and interface calls for methods,
+  properties and indexers, resolved against the project's closed world of behaviour types.
+- **Pattern matching**: `is` type/declaration/property patterns, switch expressions and relational
+  patterns.
+- **Cross-behaviour C#**: synchronous methods, properties, indexers and fields on another BetterUdon
+  behaviour, with arguments, return values and private state behaving like normal C#.
+- **Several behaviours on one object**, including two components of the same type.
+- **Networking**: synced structs and struct arrays, interpolation, sync modes, `OnChange` callbacks
+  and parameterised `[NetworkCallable]` events.
+- **Editor tooling**: generated assembly and disassembly in the inspector, a compile button and a
+  green-to-red complexity bar.
+
+## A small example
+
+A backpack is a good test: it needs a value type, two collections, an event, a pattern match and a
+synced value, without any boilerplate for Udon's heap.
 
 ```csharp
 using BetterUdon;
+using System;
 using System.Collections.Generic;
 
-// A normal C# struct. BetterUdon gives it real value semantics.
-public struct Weapon
+public struct Item
 {
     public string name;
-    public int damage;
+    public int value;
 
-    public Weapon(string name, int damage)
+    public Item(string name, int value)
     {
         this.name = name;
-        this.damage = damage;
+        this.value = value;
     }
 
     public void Upgrade(int amount)
     {
-        damage += amount;          // mutates this value
+        value += amount;
     }
 }
 
-public class PlayerInventory : BetterUdonBehaviour
+public class Backpack : BetterUdonBehaviour
 {
     [BetterUdonSynced] public int coins;
 
-    public List<Weapon> bag;       // created in Start
-    public Weapon equipped;
+    public List<Item> items;
+    public Dictionary<string, int> counts;
+
+    public event Action<Item> ItemAdded;
 
     private void Start()
     {
-        bag = new List<Weapon>();
-        bag.Add(new Weapon("Sword", 10));
-        bag.Add(new Weapon("Bow", 6));
+        items = new List<Item>();
+        counts = new Dictionary<string, int>();
 
-        // Structs are copied by value: this is a copy of the sword.
-        equipped = bag[0];
-        equipped.Upgrade(5);       // equipped.damage becomes 15; bag[0].damage stays 10
+        Add(new Item("Sword", 10));
+        Add(new Item("Potion", 3));
     }
 
-    public void Equip(int slot)
+    public void Add(Item item)
     {
-        equipped = bag[slot];      // copy the chosen weapon into `equipped`
+        items.Add(item);
+        counts[item.name] = counts.ContainsKey(item.name) ? counts[item.name] + 1 : 1;
+        ItemAdded(item);
+    }
+
+    public Item Best()
+    {
+        Item best = items[0];
+
+        foreach (Item item in items)
+        {
+            if (item.value > best.value)
+                best = item;
+        }
+
+        return best;
+    }
+
+    public void SellBest()
+    {
+        Item item = Best();
+        coins += item.value;
+        items.Remove(item);
         RequestSerialization();
     }
 
-    public bool Buy(Weapon weapon, int price)
+    public string Rarity(Item item) => item.value switch
     {
-        if (coins < price)
-            return false;
-
-        coins -= price;
-        bag.Add(weapon);
-        RequestSerialization();
-        return true;
-    }
+        > 50 => "rare",
+        > 10 => "uncommon",
+        _ => "common",
+    };
 }
 ```
 
-Notice that `Weapon` is just a struct, `List<Weapon>` is just a list, and the synced `coins` field is a plain int. The only BetterUdon-specific parts are the base class and the `[BetterUdonSynced]` attribute. Collections are created in `Start` because field initializers must be compile-time constants.
+The details that matter:
+
+- `Item` is a struct, so `best`, `item` and `bag[0]` are independent values. Copying one never aliases
+  another.
+- `List<Item>` and `Dictionary<string, int>` work without boxing wrappers or manual array bookkeeping.
+- `ItemAdded(item)` is a multicast event. With one subscriber, ten, or none, it behaves like C#.
+- `Rarity` uses a switch expression and relational patterns.
+- `coins` is a synced public field. `RequestSerialization()` is the only network call in the example.
+- `Start` creates the collections because C# field initialisers must be compile-time constants on Udon.
 
 ## Install
 
-BetterUdon is a Unity package. Install it from the git repository:
+BetterUdon is a Unity package. `main` is the 2.0 line; use a pinned tag if you want a fixed point.
 
 1. Open **Window > Package Manager**.
 2. Press **+** → **Add package from git URL…**
-3. Paste the URL and press **Add**:
+3. Paste one of these:
+
+   Main line:
 
    ```
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   The feature-expansion release is available from the `v2.0.0-alpha.1` tag:
+   Pinned 2.0 alpha:
 
    ```
    https://github.com/emildahl580-del/BetterUdon.git#v2.0.0-alpha.1
    ```
 
-   To follow the branch directly instead of a pinned release:
+   Development branch:
 
    ```
    https://github.com/emildahl580-del/BetterUdon.git#feature-expansion
    ```
 
-   `main` still tracks the earlier stable line until the expansion is merged.
+Requires **VRChat SDK – Worlds 3.5 or newer**. The package declares `com.vrchat.worlds` as a
+`vpmDependencies` entry, so VCC and Unity's package manager understand the requirement.
 
-Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
-`vpmDependencies` entry, so VCC and the package manager understand the requirement).
+### Other installs
 
-### Alternative installs
-
-- **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
-  in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-2.0.0-alpha.1.zip` from the
+- **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`.
+- **Zip** — take `BetterUdon-2.0.0-alpha.1.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
-- **Copy** — copy this folder into your project's `Packages/` directory.
-
-### Updating
+- **Copy** — copy the package folder into your project's `Packages/` directory.
 
 Package Manager keeps the checkout under `Library/PackageCache`. Use **Update** in the package's
-context menu, or change the tag in `Packages/manifest.json` to move to a specific release.
+context menu, or change the tag in `Packages/manifest.json` to move between releases.
 
-## Use
+## Getting started
 
-1. Add a component deriving from `BetterUdon.BetterUdonBehaviour` to a GameObject. The inspector
-   creates the backing `UdonBehaviour` and the generated program asset.
-2. Write C#. Public fields become the Udon program's public variables.
-3. Press **Recompile**, or `Tools > BetterUdon > Compile All Programs`.
-4. Press Play — ClientSim runs the generated program.
+1. Add a component deriving from `BetterUdon.BetterUdonBehaviour` to a GameObject.
+2. Write normal C#. Public fields become Udon public variables.
+3. Press **Recompile** in the component Inspector, or run
+   `Tools > BetterUdon > Compile All Programs`.
+4. Press Play. ClientSim runs the generated program exactly like a normal Udon behaviour.
 
-The **Program** box shows a complexity bar (green → red) for heap slots, instruction words and
-generic instantiations, so expensive generated programs are visible before they become a runtime or
-upload problem. The budgets are BetterUdon guidance, not hard Udon limits.
+The **Program** box shows the generated assembly and disassembly. It also contains a complexity bar
+that fills from green to red as the program approaches BetterUdon's own budgets for heap slots,
+instruction words and generic instantiations. Those are guidance values, not hard Udon limits.
 
 `Tools > BetterUdon > Run Diagnostics` compiles every behaviour and writes the generated assembly,
 diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 
-## Supported
+## What UdonSharp cannot do
 
-- **Structs** with real value semantics, constructors, mutating methods, nesting, arrays and
-  member-wise `Equals`.
-- **`List<T>`** — `Count`, `Capacity` (get/set), indexer, `Add`, `AddRange`, `Insert`, `RemoveAt`,
-  `Remove`, `Clear`, `Contains`, `IndexOf`, `ToArray`, `TrimExcess`, `foreach`.
-- **Other collections** — `Queue<T>` (`Enqueue`/`Dequeue`/`Peek`), `Stack<T>` (`Push`/`Pop`/`Peek`),
-  `HashSet<T>` (`Add`/`Remove`/`Contains`), and `Dictionary<K,V>` (indexer, `Add`, `ContainsKey`,
-  `TryGetValue`, `Remove`, `Count`, `TrimExcess`, `KeyValuePair` foreach, stored `Keys`/`Values` with
-  `Count`, `Contains`, `ToArray`, `CopyTo` and `foreach`) with struct/string keys and values.
-- **Iterators** — `yield return` and `yield break` lowered to a synchronous state machine for direct
-  `foreach` over a local iterator method.
-- **Delegates and events** — `Action`, `Action<T>` and `Func<..., TResult>` method groups and
-  lambdas (capturing or not) with `+=`/`-=`, multicast invocation, multi-subscriber `event` fields
-  and cross-behaviour targets.
-- `ref` / `out` / `in`, `out var`, named arguments, optional arguments, `params`.
-- Local functions with captures; properties with explicit or expression-bodied accessors.
-- `?.`, `??=`, `is null` / `is not null`, `switch` with `when`, `for` / `while` / `do` / `foreach`.
-- `is` type/declaration/property patterns and switch expressions with constant, relational, `when`
-  and discard arms.
-- `typeof(T)`, `GetComponent<T>()` and friends.
-- Cross-behaviour `SendCustomEvent` and `Get`/`SetProgramVariable`.
-- **Cross-behaviour fields** — `GetComponent<Other>()` (or an inspector reference) then `other.value`
-  reads and writes the other behaviour's public variables, with structs copied by value.
-- **Cross-behaviour methods and properties** — `int hits = other.GetHits()`, `other.DoThing(a, b)` and
-  `other.Total` work synchronously; the method body is inlined against the other behaviour, so
-  arguments, return values and private state all behave like C#.
-- **Network sync** — `[BetterUdonSynced]` on fields, including user structs and struct arrays (the
-  compiler generates the synced mirrors and the serialisation entry points), with interpolation modes
-  and `[BetterUdonSynced(OnChange = nameof(...))]` callbacks.
-- **Network events** — `SendCustomNetworkEvent`, local or remote, with `[NetworkCallable]` entry
-  points taking up to eight parameters.
-- **`[BetterUdonBehaviourSyncMode]`** — `Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`,
-  validated the way UdonSharp validates them.
-- **Recursion** - `[RecursiveMethod]` compiles a method once and keeps a growable frame stack at
-  runtime, so direct and mutual recursion with arguments and return values works at practical depths.
-- **Several behaviours on one GameObject** — including two components of the same type. Each proxy
-  gets its own backing `UdonBehaviour`, and typed `GetComponent<T>()` returns the matching one.
-- **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
-- **Virtual and interface calls** — closed-world dispatch over the receiver's type marker for methods
-  and properties; each implementation is inlined with the receiver bound, so calls are synchronous.
-  `is`/`as` against known behaviour types use the same marker.
-- **Generic methods and structs** — monomorphised per instantiation, including struct layouts,
-  `default(T)`, `new T()`, `typeof(T)`, `T[]`, `ref`/`out T`, nested generic calls and
-  `IComparable<T>.CompareTo` for numeric and user-struct types.
-- **Udon events** — any `Event_*` node (`OnPlayerJoined`, `OnPickup`, …) matched by method name.
+This is the practical difference, not a marketing table:
 
-### UdonSharp compatibility
-
-Everything UdonSharp can express is covered, plus the language features above:
-
-| UdonSharp feature | BetterUdon |
+| UdonSharp restriction | BetterUdon |
 | --- | --- |
-| `[UdonSynced]` + interpolation modes | `[BetterUdonSynced]` (same modes) |
+| No user-defined structs | Structs with constructors, mutating methods, nesting and value semantics |
+| No collections | `List<T>`, `Dictionary<K,V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>` |
+| No generics | Generic methods and generic structs, monomorphised |
+| No recursion | Direct and mutual recursion through `[RecursiveMethod]` |
+| No `ref` / `out` | `ref`, `out`, `in`, `out var`, copy-in/copy-back |
+| No local functions | Local functions with captures |
+| No delegates or events | Method groups, lambdas, capturing closures, multicast events |
+| No iterators | `yield return` / `yield break` for direct `foreach` |
+| No interface or virtual dispatch | Closed-world dispatch for methods, properties and indexers |
+| No cross-behaviour methods | Synchronous inlined calls with arguments and return values |
+| No multiple behaviours per object | Several behaviours, including duplicates of the same type |
+| No pattern matching | `is` patterns, property patterns, switch expressions |
+| No `?.` / `??=` | Supported |
+| No `typeof` | Supported, including generic `typeof(T)` |
+
+## How it works
+
+BetterUdon asks **Roslyn** for the semantic model of the project's actual C# sources. It then lowers
+each behaviour into a Udon program:
+
+1. **Front end** — parse every `.cs` file under `Assets/`, resolve real C# symbols, overloads and
+   conversions.
+2. **Lowering** — turn expressions, statements, structs, collections, generics, calls and events into
+   heap slots and labels. Normal calls are inlined; `[RecursiveMethod]` methods become callable blocks.
+3. **Emission** — build Udon assembly, validate every extern signature against the installed SDK, and
+   assemble it with VRChat's toolchain.
+4. **Storage** — serialize the resulting `UdonProgram` into a normal Udon program asset.
+
+Nothing custom runs in the world. At runtime it is stock Udon: the same VM, heap and externs as any
+other world.
+
+## Feature notes
+
+### Structs and value semantics
+
+A struct is stored as an `object[]` of its fields. Every operation that C# would copy does an explicit
+deep copy: assignment, argument passing, returning, reading an array element, writing a struct field.
+Lvalue chains skip the copy until the final write, so `stats.weapon.itemId = 42` still writes through.
+
+### Collections
+
+`List<T>` is a two-element heap object: `[T[] items, int count]`. `Queue<T>`, `Stack<T>` and
+`HashSet<T>` use the same shape. `Dictionary<K,V>` is `[K[] keys, V[] values, int count]`.
+
+Dictionary and set lookup use member-wise equality with a linear scan. That is intentionally simple:
+it keeps primitives, strings and user structs correct without a runtime service. Hash-table speed is
+traded for predictability and zero extra runtime code.
+
+`Dictionary.Keys` and `Dictionary.Values` are stored collection values supporting `Count`,
+`Contains`, `ToArray`, `CopyTo` and `foreach`.
+
+### Generics
+
+Generic methods and generic structs are monomorphised. `Box<int>` and `Box<string>` become separate
+struct layouts; `Identity<int>(7)` and `Identity<string>("x")` become separate inlined bodies. There
+is no runtime generic construction — every instantiation must be visible at build time.
+
+### Recursion
+
+Unmarked recursion is a compile error. Mark a method with `[RecursiveMethod]` and it is compiled once
+as a labelled block. Calls push a return address and jump; re-entry saves the caller's live slots on a
+growable heap stack. Direct and mutual recursion work. Recursive methods cannot take `ref`/`out`/`in`
+parameters, be called on another behaviour, or be combined with `[NetworkCallable]`.
+
+### Delegates and events
+
+A delegate stores an invocation array of `(target, method ID, closure)` entries. `+=` and `-=` add and
+remove entries; invocation loops the entries and inlines each target synchronously. Method groups,
+capturing lambdas, multicast events and cross-behaviour targets are supported. A captured variable is
+snapshotted at delegate creation and written back after invocation, rather than being a shared alias.
+
+### Iterators
+
+An iterator used directly by `foreach` is compiled into the caller as a resumable block. A heap state
+slot records the last `yield`; locals live on the heap. Nested loops, arguments and `yield break` are
+supported. Manual `IEnumerator` objects and async/coroutine scheduling are not.
+
+### Interfaces, inheritance and dispatch
+
+Every BetterUdon behaviour in the project is visible to the compiler. A virtual, override, abstract or
+interface call switches on the receiver's hidden type marker and inlines the matching implementation.
+This keeps the call synchronous and preserves arguments, return values and private fields. Properties
+and indexers use the same mechanism. `is` and `as` use the same marker table.
+
+`base.Method()` is statically bound and is not dispatched.
+
+### Cross-behaviour calls
+
+With a reference to another BetterUdon behaviour, fields, properties, indexers and methods behave like
+C#. The callee body is inlined against the receiver, so calls are synchronous. `SendCustomEvent` remains
+available when you actually want asynchronous dispatch.
+
+### Networking
+
+`[BetterUdonSynced]` marks synced fields. Structs and struct arrays are flattened into hidden syncable
+mirrors automatically. Interpolation modes, `[BetterUdonBehaviourSyncMode]` and
+`[BetterUdonSynced(OnChange = nameof(...))]` match UdonSharp's sync model. `SendCustomNetworkEvent`
+supports parameterised `[NetworkCallable]` entry points.
+
+Sync mode belongs to the GameObject, not the behaviour: several BetterUdon behaviours on one object
+share one sync mode.
+
+## UdonSharp compatibility
+
+Everything UdonSharp can express is covered:
+
+| UdonSharp feature | BetterUdon equivalent |
+| --- | --- |
+| `[UdonSynced]` + interpolation | `[BetterUdonSynced]` |
 | `[FieldChangeCallback]` | `[BetterUdonSynced(OnChange = nameof(...))]` |
-| `[UdonBehaviourSyncMode]` | `[BetterUdonBehaviourSyncMode]` (`Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`) |
-| `SendCustomNetworkEvent` | `SendCustomNetworkEvent`, including `[NetworkCallable]` parameters |
-| `[RecursiveMethod]` | `[RecursiveMethod]` (manual frame stack, `JUMP_INDIRECT` return) |
-| Several behaviours on one GameObject | supported, one backing `UdonBehaviour` each, duplicates included |
-| Udon events (`OnPlayerJoined`, …) | any `Event_*` node, matched by method name |
-| `SendCustomEvent`, delayed variants, `Get`/`SetProgramVariable`, `RequestSerialization`, `Networking.*` | ✓ |
-| Inheritance between behaviours | ✓ (fields of base behaviours become variables) |
+| `[UdonBehaviourSyncMode]` | `[BetterUdonBehaviourSyncMode]` |
+| `SendCustomNetworkEvent` | Same, with `[NetworkCallable]` parameters |
+| `[RecursiveMethod]` | Same, with both direct and mutual recursion |
+| Udon events (`OnPlayerJoined`, …) | Same event names |
+| `SendCustomEvent`, delayed variants, `Get`/`SetProgramVariable` | Same |
+| Inheritance between behaviours | Same, with base fields and methods inlined |
 
-Remaining differences: `[RecursiveMethod]` is still required for recursion (direct and mutual
-recursion between marked methods is supported), and `#if UDONSHARP` dual-compilation is not emulated.
+## Limits
 
-### Sync mode is per GameObject
+BetterUdon is a compiler, not a new runtime. It cannot add capabilities the VM does not have.
 
-Udon stores the sync mode on the GameObject, not on the behaviour: setting it applies to every
-`UdonBehaviour` there. Several BetterUdon behaviours on one object therefore share one mode, so a
-`Manual` behaviour next to a `Continuous` one needs separate GameObjects.
-
-## Not supported
-
-Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
-components, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects and `yield` inside
-`try`/`finally`. `record struct` and list patterns require C# 10/11, while the project compiles as
-C# 9. Capturing closures snapshot their values rather than sharing the original variable. These are
-tracked in `Documentation~/aot-expansion.md`.
-
-## What's new
-
-**2.0.0-alpha.1** is the AOT feature expansion: mutual recursion, monomorphised generic methods and structs,
-closed-world virtual/interface dispatch (methods, properties and indexers), `Queue`/`Stack`/`HashSet`/
-`Dictionary` including `TryGetValue`, `Keys`/`Values` and `TrimExcess`, synchronous iterators,
-multicast delegates/events with capturing lambdas and cross-behaviour targets, type/declaration/property
-patterns, switch expressions and a complexity bar in the inspector. See
-[CHANGELOG.md](CHANGELOG.md) for the full history and `Documentation~/aot-expansion.md` for the
-remaining language-level limits.
+- No `try` / `catch` / `throw`: Udon halts a behaviour on an exception and does not unwind.
+- No `async` / `await`, coroutine scheduling or manual `IEnumerator` objects.
+- No runtime generics, generic classes or generic behaviour components.
+- No `lock`, `unsafe`, threads or native code.
+- `record struct` needs C# 10 and list patterns need C# 11; the project compiles as C# 9, so those
+  syntaxes are unavailable.
+- Captured closures snapshot values instead of sharing the original variable.
+- The callable BCL/Unity surface is the set of externs exposed by the installed SDK, plus the
+  collection and language intrinsics BetterUdon implements itself.
+- Generic constraint calls are limited to `IComparable<T>.CompareTo` on numeric and user-struct types.
+- Auto-property and collection fields are heap variables with non-serialisable backings; create
+  collections in `Start` and treat inspector values as defaults.
+- BetterUdon's compiler guard rejects programs over 20,000 heap slots or 256 generic instantiations.
+  The inspector warning also includes a 50,000 instruction-word guidance budget. These are BetterUdon
+  guardrails, not Udon limits.
 
 ## Documentation
 
-`Documentation~/index.md` is a paper covering the runtime model, the struct and `List<T>` lowering
-strategies, the compiler architecture and the remaining limits.
-`Documentation~/aot-expansion.md` is the working checklist for the current AOT expansion.
+- `Documentation~/index.md` — the compiler and runtime model, lowering strategies, language coverage,
+  networking and limits.
+- `Documentation~/aot-expansion.md` — the working checklist of what is implemented and what is blocked.
 
 ## License
 
