@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 2.0.0-alpha1**
+**Version 2.0.0-alpha.1**
 
 ---
 

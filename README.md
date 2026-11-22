@@ -79,10 +79,10 @@ BetterUdon is a Unity package. Install it from the git repository:
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   The feature-expansion release is available from the `v2.0.0-alpha1` tag:
+   The feature-expansion release is available from the `v2.0.0-alpha.1` tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0-alpha1
+   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0-alpha.1
    ```
 
    To follow the branch directly instead of a pinned release:
@@ -100,7 +100,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-2.0.0-alpha1.zip` from the
+- **Zip** — grab `BetterUdon-2.0.0-alpha.1.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 
@@ -206,7 +206,7 @@ tracked in `Documentation~/aot-expansion.md`.
 
 ## What's new
 
-**2.0.0-alpha1** is the AOT feature expansion: mutual recursion, monomorphised generic methods and structs,
+**2.0.0-alpha.1** is the AOT feature expansion: mutual recursion, monomorphised generic methods and structs,
 closed-world virtual/interface dispatch (methods, properties and indexers), `Queue`/`Stack`/`HashSet`/
 `Dictionary` including `TryGetValue`, `Keys`/`Values` and `TrimExcess`, synchronous iterators,
 multicast delegates/events with capturing lambdas and cross-behaviour targets, type/declaration/property
