@@ -73,7 +73,34 @@ namespace BetterUdon.Editor
             EnsureRecursiveStack();
 
             foreach (IMethodSymbol method in recursive)
-                GetRecursiveInfo(method).Label = "__method_" + UdonTypeSystem.Sanitize(method.Name) + "_" + (_labelCounter++);
+            {
+                if (method.IsGenericMethod)
+                {
+                    AddError($"'{method.Name}' cannot be a [RecursiveMethod] because generic methods are not supported.",
+                        method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                    continue;
+                }
+
+                RecursiveMethodInfo info = GetRecursiveInfo(method);
+                info.Label = "__method_" + UdonTypeSystem.Sanitize(method.Name) + "_" + (_labelCounter++);
+
+                // Parameters and the return slot are part of the method's frame, but they have to
+                // exist before any block is emitted: a mutually recursive call can target a method
+                // whose block has not been compiled yet.
+                foreach (IParameterSymbol parameter in method.Parameters)
+                {
+                    if (parameter.RefKind != RefKind.None)
+                    {
+                        AddError($"'{method.Name}' is recursive, so its parameters cannot be ref/out/in.",
+                            method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                    }
+
+                    info.ParameterSlots.Add(NewSlot(parameter.Type, "recParam"));
+                }
+
+                if (!method.ReturnsVoid)
+                    info.ReturnSlot = NewSlot(method.ReturnType, "recRet");
+            }
         }
 
         private void EmitRecursiveMethodBlocks(List<IMethodSymbol> methods)
@@ -99,7 +126,6 @@ namespace BetterUdon.Editor
 
             if (!method.ReturnsVoid)
             {
-                info.ReturnSlot = NewSlot(method.ReturnType, "recRet");
                 returnContext.ReturnSlot = info.ReturnSlot;
 
                 // A frame push happens before the first return of this invocation, so the return slot
@@ -114,24 +140,8 @@ namespace BetterUdon.Editor
             {
                 using (PushScope())
                 {
-                    foreach (IParameterSymbol parameter in method.Parameters)
-                    {
-                        if (parameter.RefKind != RefKind.None)
-                        {
-                            AddError($"'{method.Name}' is recursive, so its parameters cannot be ref/out/in.",
-                                method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
-                        }
-
-                        Slot parameterSlot = NewSlot(parameter.Type, "recParam");
-                        _scopes[_scopes.Count - 1][parameter] = parameterSlot;
-                        info.ParameterSlots.Add(parameterSlot);
-                    }
-
-                    if (method.Parameters.Length != info.ParameterSlots.Count)
-                    {
-                        AddError($"'{method.Name}' cannot be compiled as a recursive method.", null);
-                        return;
-                    }
+                    for (int i = 0; i < method.Parameters.Length; i++)
+                        _scopes[_scopes.Count - 1][method.Parameters[i]] = info.ParameterSlots[i];
 
                     EmitMethodBody(method, returnContext);
                 }
@@ -151,20 +161,52 @@ namespace BetterUdon.Editor
             info.FrameEnd = _asm.Slots.Count;
         }
 
-        /// <summary>Emits a call to a recursive method from a non-recursive body.</summary>
-        private Slot EmitRecursiveEntryCall(IMethodSymbol method, List<Slot> arguments, SyntaxNode node)
+        /// <summary>
+        /// Emits a call to a recursive method. The caller may be a normal method or another recursive
+        /// block; in the latter case the caller's live frame is saved and restored around the call, so
+        /// direct and mutual recursion share the same mechanism.
+        /// </summary>
+        private Slot EmitRecursiveCall(IMethodSymbol method, List<Slot> arguments, SyntaxNode node)
         {
             RecursiveMethodInfo info = GetRecursiveInfo(method);
 
-            if (!info.Emitted)
+            if (string.IsNullOrEmpty(info.Label))
             {
-                AddError($"'{method.Name}' is recursive and calls another recursive method; mutual recursion is not " +
-                         "supported. Mark only the method that recurses and call the other one normally.", node);
+                AddError($"'{method.Name}' is marked [RecursiveMethod] but cannot be compiled as a recursive " +
+                         "method here. Recursive methods must be non-static, non-generic methods declared on " +
+                         "the behaviour itself.", node);
                 return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
             }
 
+            RecursiveMethodInfo caller = _currentRecursiveBlock != null
+                ? GetRecursiveInfo(_currentRecursiveBlock)
+                : null;
+
+            // Everything the caller's block has used so far is live at this point and has to survive
+            // re-entry. Parameters and the return slot belong to the frame even though they were
+            // allocated up front.
+            List<Slot> frame = null;
+            if (caller != null)
+            {
+                frame = new List<Slot>();
+
+                if (caller.ReturnSlot != null)
+                    frame.Add(caller.ReturnSlot);
+
+                frame.AddRange(caller.ParameterSlots);
+                frame.AddRange(_asm.Slots.Skip(caller.FrameStart).Take(_asm.Slots.Count - caller.FrameStart));
+
+                EmitEnsureStackCapacity(frame.Count + 1);
+
+                foreach (Slot slot in frame)
+                    EmitPushFrameValue(slot);
+            }
+
             if (!BindRecursiveParameters(info, arguments, node))
+            {
+                EmitRestoreFrame(frame);
                 return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
+            }
 
             string returnLabel = NewLabel("recCallReturn");
             Slot address = NewSlot(_uintType, "recCallAddress");
@@ -174,39 +216,7 @@ namespace BetterUdon.Editor
             _asm.Jump(info.Label);
             _asm.MarkLabel(returnLabel);
 
-            if (method.ReturnsVoid)
-                return null;
-
-            Slot result = NewSlot(method.ReturnType, "recResult");
-            Copy(info.ReturnSlot, result);
-            return result;
-        }
-
-        /// <summary>Emits a recursive call from inside the block that is currently being emitted.</summary>
-        private Slot EmitRecursiveSelfCall(IMethodSymbol method, List<Slot> arguments, SyntaxNode node)
-        {
-            RecursiveMethodInfo info = GetRecursiveInfo(method);
-
-            // Everything the block has used so far is live at this point and has to survive re-entry.
-            List<Slot> frame = _asm.Slots.Skip(info.FrameStart).Take(_asm.Slots.Count - info.FrameStart).ToList();
-
-            EmitEnsureStackCapacity(frame.Count + 1);
-
-            foreach (Slot slot in frame)
-                EmitPushFrameValue(slot);
-
-            if (!BindRecursiveParameters(info, arguments, node))
-                return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
-
-            string returnLabel = NewLabel("recSelfReturn");
-            Slot address = NewSlot(_uintType, "recSelfAddress");
-            address.AddressLabel = returnLabel;
-
-            _asm.Push(address);
-            _asm.Jump(info.Label);
-            _asm.MarkLabel(returnLabel);
-
-            // Read the result before restoring the frame: the return slot belongs to the frame.
+            // Read the result before restoring the frame: a self-call's return slot is part of it.
             Slot result = null;
             if (!method.ReturnsVoid)
             {
@@ -214,10 +224,17 @@ namespace BetterUdon.Editor
                 Copy(info.ReturnSlot, result);
             }
 
+            EmitRestoreFrame(frame);
+            return result;
+        }
+
+        private void EmitRestoreFrame(List<Slot> frame)
+        {
+            if (frame == null)
+                return;
+
             for (int i = frame.Count - 1; i >= 0; i--)
                 Copy(EmitPopFrameValue(frame[i].Type), frame[i]);
-
-            return result;
         }
 
         private bool BindRecursiveParameters(RecursiveMethodInfo info, List<Slot> arguments, SyntaxNode node)

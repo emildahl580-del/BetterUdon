@@ -228,23 +228,13 @@ namespace BetterUdon.Editor
 
             if (isUserMethod && IsRecursiveMethod(method))
             {
-                bool selfCall = SymbolEqualityComparer.Default.Equals(_currentRecursiveBlock, method);
-
-                if (!selfCall && _currentRecursiveBlock != null)
-                {
-                    AddError($"'{method.Name}' is recursive; calling it from inside another recursive method is not supported.", invocation);
-                    return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
-                }
-
-                if (!selfCall && instance != null && !IsThisReceiver(invocation))
+                if (instance != null && !IsThisReceiver(invocation))
                 {
                     AddError($"'{method.Name}' is recursive, so it cannot be called on another behaviour.", invocation);
                     return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
                 }
 
-                return selfCall
-                    ? EmitRecursiveSelfCall(method, arguments, invocation)
-                    : EmitRecursiveEntryCall(method, arguments, invocation);
+                return EmitRecursiveCall(method, arguments, invocation);
             }
 
             if (isUserMethod)

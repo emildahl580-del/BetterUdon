@@ -342,10 +342,12 @@ grows to twice the size a frame needs when it fills up.
 
 A recursive method that is also an entry point — a parameterless Udon event, or a public parameterless
 `void` method — gets a small trampoline at that entry point, so the VM or `SendCustomEvent` can start
-it. The remaining restrictions are:
+it. Direct and mutual recursion are both supported: when a block calls another recursive block, the
+caller's frame is saved on the same stack and restored after the callee returns. The remaining
+restrictions are:
 
-- Only direct self-recursion. Calling another `[RecursiveMethod]` from inside one, or calling a
-  recursive method on another behaviour, is a compile error.
+- Recursive methods must be declared on the behaviour itself. Calling one on another behaviour is a
+  compile error.
 - No `ref` / `out` / `in` parameters.
 - A Udon event that takes arguments cannot be a `[RecursiveMethod]`; move the recursion into a helper.
 - `[NetworkCallable]` and `[RecursiveMethod]` cannot be combined.
@@ -602,9 +604,9 @@ editor against the real VM. The language and struct suites alone assert 60+ prop
 Some limits remain:
 
 - **Recursion needs `[RecursiveMethod]`.** A marked method is compiled as a jumpable block with a
-  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Only direct
-  self-recursion is supported: mutual recursion, `ref` / `out` / `in` parameters, calling a recursive
-  method on another behaviour, and recursive Udon events with arguments are compile errors.
+  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Direct and
+  mutual recursion between marked methods are supported. `ref` / `out` / `in` parameters, calling a
+  recursive method on another behaviour, and recursive Udon events with arguments are compile errors.
   `[NetworkCallable]` cannot be combined with `[RecursiveMethod]` (section 6).
 - **No open generics at runtime.** A `T` cannot escape into a field or a runtime-constructed type,
   because the heap has no per-slot type identity and the VM cannot instantiate a generic type.

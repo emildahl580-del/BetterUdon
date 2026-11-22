@@ -135,8 +135,8 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   points taking up to eight parameters.
 - **`[BetterUdonBehaviourSyncMode]`** — `Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`,
   validated the way UdonSharp validates them.
-- **Recursion** — `[RecursiveMethod]` compiles a method once and keeps a growable frame stack at
-  runtime, so direct self-recursion with arguments and return values works at practical depths.
+- **Recursion** - `[RecursiveMethod]` compiles a method once and keeps a growable frame stack at
+  runtime, so direct and mutual recursion with arguments and return values works at practical depths.
 - **Several behaviours on one GameObject** — including two components of the same type. Each proxy
   gets its own backing `UdonBehaviour`, and typed `GetComponent<T>()` returns the matching one.
 - **Inheritance** — fields of base behaviours become variables; base methods and fields are inlined.
@@ -158,8 +158,8 @@ Everything UdonSharp can express is covered, plus the language features above:
 | `SendCustomEvent`, delayed variants, `Get`/`SetProgramVariable`, `RequestSerialization`, `Networking.*` | ✓ |
 | Inheritance between behaviours | ✓ (fields of base behaviours become variables) |
 
-Remaining differences: recursion is limited to direct self-recursion inside `[RecursiveMethod]`
-methods (no mutual recursion), and `#if UDONSHARP` dual-compilation is not emulated.
+Remaining differences: `[RecursiveMethod]` is still required for recursion (direct and mutual
+recursion between marked methods is supported), and `#if UDONSHARP` dual-compilation is not emulated.
 
 ### Sync mode is per GameObject
 
@@ -169,9 +169,8 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 
 ## Not supported
 
-Mutual recursion (direct self-recursion works via `[RecursiveMethod]`), open generics at runtime,
-delegates and lambdas, `try`/`catch`, `async`, `yield`, user generic methods and `Dictionary<K,V>`
-(both feasible, not implemented).
+Recursion without `[RecursiveMethod]`, open generics at runtime, delegates and lambdas, `try`/`catch`,
+`async`, `yield`, user generic methods and `Dictionary<K,V>` (both feasible, not implemented).
 
 ## What's new
 

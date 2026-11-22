@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Mutual recursion between `[RecursiveMethod]` methods. A call now saves the caller's frame regardless
+  of whether the target is the same block, so cycles such as `A → B → A` unwind correctly. Parameter
+  and return slots are allocated before any block is emitted, so a forward call to a recursive method
+  whose block has not been compiled yet still resolves.
+
 ## 1.6.1
 
 Bug sweep across the language, struct, recursion and cross-behaviour paths.
