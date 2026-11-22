@@ -62,7 +62,7 @@ BetterUdon is a Unity package. Install it from the git repository:
    To pin a release, append the tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v1.3.0
+   https://github.com/emildahl580-del/BetterUdon.git#v1.4.0
    ```
 
 Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
@@ -72,7 +72,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-1.3.0.zip` from the
+- **Zip** — grab `BetterUdon-1.4.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 
@@ -105,8 +105,9 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
 - Cross-behaviour `SendCustomEvent` and `Get`/`SetProgramVariable`.
 - **Cross-behaviour fields** — `GetComponent<Other>()` (or an inspector reference) then `other.value`
   reads and writes the other behaviour's public variables, with structs copied by value.
-- **Cross-behaviour methods** — `other.DoThing()` (public, parameterless, `void`) is raised as an Udon
-  event; arguments and return values travel through public fields.
+- **Cross-behaviour methods and properties** — `int hits = other.GetHits()`, `other.DoThing(a, b)` and
+  `other.Total` work synchronously; the method body is inlined against the other behaviour, so
+  arguments, return values and private state all behave like C#.
 - **Network sync** — `[BetterUdonSynced]` on fields, including user structs and struct arrays (the
   compiler generates the synced mirrors and the serialisation entry points).
 

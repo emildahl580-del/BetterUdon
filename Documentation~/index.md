@@ -318,9 +318,10 @@ and a copy never aliases the element.
 
 ### Across behaviours
 
-Each program owns its heap, so another behaviour's variables are reached through the only door Udon
-provides: its public variable table. Field access is lowered to `GetProgramVariable` and
-`SetProgramVariable`, which keeps the C# shape:
+Each program owns its heap, so another behaviour's members are reached through the only door Udon
+provides: `GetProgramVariable` and `SetProgramVariable` on its backing `UdonBehaviour`. Field access is
+lowered to those calls; methods are inlined with the other behaviour bound as `this`. Both keep the
+C# shape:
 
 ```csharp
 public class Door : BetterUdonBehaviour
@@ -332,57 +333,38 @@ public class Door : BetterUdonBehaviour
         if (!lever.pulled)
             return;
 
-        lever.uses = lever.uses + 1; // reads and writes the Lever's public variable
+        lever.uses = lever.uses + 1; // field: read + write the Lever's heap
+        lever.Total = 5;             // auto property
+        int marks = lever.Play(3);   // method: arguments and a return value
     }
 }
 ```
 
-- **Only public variables are visible.** A private field, a `List<T>`, an auto property or a
-  `[BetterUdonNoExport]` field is a compile error that names the field.
-- **Value semantics are kept.** Reading a struct field copies it (the receiver's value cannot be
-  mutated through the copy) and writing a struct stores a copy.
+- **Fields** read and write the receiver's heap. Reading a struct copies it; writing a struct stores a
+  copy, so value semantics hold across behaviours.
+- **Methods are inlined**: the body is compiled into the caller with the receiver as `this`, so
+  arguments, return values, nested calls and private fields all work, and the call returns
+  immediately. The body only ever touches the receiver's variables.
+- **Properties** work: an auto property reads/writes its backing variable, a property with accessor
+  bodies is inlined the same way as a method. Indexers cannot cross behaviours.
+- **Accessibility still applies.** From outside a type only its accessible members can be named (C#
+  checks that); inside an inlined body of that type, private fields are reachable because they are
+  heap variables of the receiver. Public fields that BetterUdon does not export (`List<T>`,
+  `[BetterUdonNoExport]`, auto properties) are still reachable through their symbol; any other field
+  is a compile error that names it.
+- **Unity members and events follow `this`.** `transform`, `gameObject`, `enabled`,
+  `SendCustomEvent`, `GetProgramVariable` and `SetProgramVariable` inside an inlined body act on the
+  receiver.
 - **References survive a build.** A public field typed as a BetterUdon behaviour is stored as that
   behaviour's backing `UdonBehaviour`, because the C# component is removed from a built world.
 - **`GameObject.GetComponent<T>()` works** for BetterUdon behaviours: the lookup is done on the
   backing `UdonBehaviour` and then verified against a hidden type marker, so a different behaviour on
   that object yields `null`, exactly like `GetComponent` should.
-- **`GetComponent`/`GetComponentInChildren`/`GetComponentInParent` on `this`** cannot find another
-  behaviour (a GameObject hosts one BetterUdon behaviour), and the `InChildren`/`InParent` forms are
-  rejected for behaviour types because Udon cannot search by behaviour type.
-- **Properties are not reachable**, and neither are methods that take arguments or return a value:
-  there is no call stack between programs. Use a public field for data and an event for behaviour.
-
-#### Methods
-
-A public, parameterless `void` method on another behaviour is one of its Udon entry points, so a call
-is lowered to `SendCustomEvent`:
-
-```csharp
-public class Door : BetterUdonBehaviour
-{
-    public Lever lever;
-
-    public void Open()
-    {
-        lever.Pull();          // SendCustomEvent("Pull") on the Lever
-    }
-}
-```
-
-The call is **asynchronous**: the body runs on the other behaviour after the caller yields, which is
-Udon's event model. Any state it changes is visible on the next frame.
-
-Arguments and return values cannot cross. Write the input to a public field, raise the event, then
-read the result from a public field:
-
-```csharp
-lever.amount = 3;          // argument
-lever.Pull();              // event
-int uses = lever.uses;     // result, once the Lever has run
-```
-
-Methods that take arguments or return a value produce a compile error that says exactly this, rather
-than generating a call that silently does nothing.
+- **`GetComponentInChildren`/`InParent`** are rejected for behaviour types because Udon cannot search
+  by behaviour type; pass the `GameObject` and call `GetComponent` on it.
+- **Explicit events remain available.** When the call must be asynchronous (a one-way notification, or
+  code that runs on the other behaviour's own schedule), use `SendCustomEvent`; a method call is
+  synchronous and runs in the caller's execution.
 
 ---
 

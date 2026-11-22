@@ -33,9 +33,14 @@ namespace BetterUdon.Editor
         {
             if (field.IsStatic)
             {
-                AddError($"'{field.Name}' is static; only instance public variables can be read from another behaviour.", node);
+                AddError($"'{field.Name}' is static; only instance variables can be read from another behaviour.", node);
                 return false;
             }
+
+            // Inside an inlined method body every field of the receiver is a heap variable, exported or
+            // not, so private state is reachable exactly where C# would allow it.
+            if (InRemoteBody && IsRemoteMemberOf(field))
+                return true;
 
             if (!IsExported(field))
             {
@@ -58,34 +63,43 @@ namespace BetterUdon.Editor
             return raw;
         }
 
-        /// <summary>Reads <c>receiver.field</c> through the receiver's public variables.</summary>
+        /// <summary>Reads <c>receiver.field</c> through the receiver's heap.</summary>
         private Slot EmitReadBehaviourField(Slot receiver, IFieldSymbol field, SyntaxNode node, bool clone = true)
         {
             if (!ValidateCrossBehaviourField(field, node))
                 return NewSlot(field.Type, "bad");
 
-            Slot raw = EmitGetProgramVariable(receiver, field.Name, "GetProgramVariable");
+            return EmitReadBehaviourMember(receiver, field.Name, field.Type, node, clone);
+        }
 
-            // Give the value the field's type so later operations (member access, operators, calls) see
+        /// <summary>Reads a heap variable of another behaviour by symbol name.</summary>
+        private Slot EmitReadBehaviourMember(Slot receiver, string symbolName, ITypeSymbol type, SyntaxNode node, bool clone = true)
+        {
+            Slot raw = EmitGetProgramVariable(receiver, symbolName, "GetProgramVariable");
+
+            // Give the value the member's type so later operations (member access, operators, calls) see
             // the right type, then copy structs so the read keeps value semantics.
-            Slot typed = NewSlot(field.Type, "progvarValue");
+            Slot typed = NewSlot(type, "progvarValue");
             Copy(raw, typed);
 
             return clone ? MaybeCloneStruct(typed) : typed;
         }
 
-        /// <summary>Writes <c>receiver.field = value</c> through the receiver's public variables.</summary>
+        /// <summary>Writes <c>receiver.field = value</c> through the receiver's heap.</summary>
         private void EmitWriteBehaviourField(Slot receiver, IFieldSymbol field, Slot value, SyntaxNode node)
         {
             if (!ValidateCrossBehaviourField(field, node))
                 return;
 
             // ConvertTo clones structs, so the other behaviour does not alias the caller's value.
-            Slot converted = ConvertTo(value, field.Type);
+            EmitWriteBehaviourMember(receiver, field.Name, ConvertTo(value, field.Type));
+        }
 
+        private void EmitWriteBehaviourMember(Slot receiver, string symbolName, Slot value)
+        {
             _asm.Push(receiver);
-            _asm.Push(ConstantSlot(_stringType, field.Name));
-            _asm.Push(converted);
+            _asm.Push(ConstantSlot(_stringType, symbolName));
+            _asm.Push(value);
             Extern($"{UdonReceiverType}.__SetProgramVariable__SystemString_SystemObject__SystemVoid", "SetProgramVariable");
         }
 

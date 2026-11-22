@@ -229,24 +229,26 @@ namespace BetterUdon.Editor
             {
                 ITypeSymbol containingType = method.ContainingType;
 
-                if (!SymbolEqualityComparer.Default.Equals(containingType, _behaviourType) && containingType.TypeKind != TypeKind.Struct)
-                {
-                    // A parameterless void method is an Udon event on the other behaviour, so it can be
-                    // raised. Udon has no call stack, so this is fire-and-forget: the body runs on the
-                    // other behaviour after this one yields.
-                    if (DerivesFromBetterUdon(containingType) && CanRaiseAsEvent(method) && instance != null)
-                    {
-                        _asm.Push(instance);
-                        _asm.Push(ConstantSlot(_stringType, method.Name));
-                        Extern($"{UdonReceiverType}.__SendCustomEvent__SystemString__SystemVoid", $"event '{method.Name}'");
-                        return null;
-                    }
+                // A call on another BetterUdon behaviour is inlined with that behaviour bound as 'this':
+                // its fields become Get/SetProgramVariable on its heap, so arguments, return values and
+                // private state all work synchronously.
+                // Inside an inlined remote body 'this' is the receiver, so calls to members of that type
+                // are still remote calls even though the syntax says 'this'.
+                bool remoteCall = DerivesFromBetterUdon(containingType) && instance != null &&
+                                  (!IsThisReceiver(invocation) || (InRemoteBody && IsRemoteMemberOf(method)));
 
+                if (!remoteCall &&
+                    !SymbolEqualityComparer.Default.Equals(containingType, _behaviourType) &&
+                    containingType.TypeKind != TypeKind.Struct)
+                {
                     AddError(DescribeUnsupportedCrossBehaviourCall(method), invocation);
                     return NewSlot(method.ReturnType, "bad");
                 }
 
-                Slot result = InlineMethod(method, instance, arguments, invocation, out List<Slot> parameterSlots);
+                List<Slot> parameterSlots;
+                Slot result = remoteCall
+                    ? InlineRemoteMethod(method, instance, arguments, invocation, out parameterSlots)
+                    : InlineMethod(method, instance, arguments, invocation, out parameterSlots);
 
                 // Write ref/out parameters back into the caller's variables.
                 if (refTargets.Length > 0 && parameterSlots != null)
@@ -281,23 +283,6 @@ namespace BetterUdon.Editor
 
             Extern(signature, $"call to '{method.Name}'");
             return externResult;
-        }
-
-        /// <summary>
-        /// Whether a method on another behaviour is one of its Udon entry points, so it can be raised
-        /// with <c>SendCustomEvent</c>.
-        /// </summary>
-        private static bool CanRaiseAsEvent(IMethodSymbol method)
-        {
-            if (method.IsStatic || method.IsGenericMethod || method.Parameters.Length != 0 || !method.ReturnsVoid)
-                return false;
-
-            if (method.DeclaredAccessibility != Accessibility.Public)
-                return false;
-
-            // Event methods are dispatched under their lowered name (_update, _interact, ...), not the
-            // C# name, so raising them by name would not reach anything.
-            return !UdonRegistry.Instance.TryGetEvent(method.Name, out _);
         }
 
         private static string DescribeUnsupportedCrossBehaviourCall(IMethodSymbol method)
@@ -440,7 +425,7 @@ namespace BetterUdon.Editor
 
             Slot instance = invocation.Expression is MemberAccessExpressionSyntax memberAccess
                 ? EmitExpression(memberAccess.Expression)
-                : _udonThisSlot;
+                : _thisSlot;
 
             Slot typeSlot = ConstantSlot(_systemTypeSymbol, systemType, "SystemType");
             Slot componentSlot = NewSlot(_componentTypeSymbol, "component");
@@ -467,7 +452,7 @@ namespace BetterUdon.Editor
 
             // These APIs are also callable on *another* behaviour, which is how BetterUdon behaviours
             // talk to each other.
-            Slot receiver = _udonThisSlot;
+            Slot receiver = _thisSlot;
 
             if (invocation.Expression is MemberAccessExpressionSyntax receiverAccess)
             {
@@ -532,7 +517,7 @@ namespace BetterUdon.Editor
                     Extern("VRCSDKBaseNetworking.__get_LocalPlayer__VRCSDKBaseVRCPlayerApi", "Networking.LocalPlayer");
 
                     Slot target = NewSlot(_model.Compilation.GetTypeByMetadataName("UnityEngine.GameObject"), "ownerTarget");
-                    _asm.Push(_udonThisSlot);
+                    _asm.Push(_thisSlot);
                     _asm.Push(target);
                     Extern("UnityEngineComponent.__get_gameObject__UnityEngineGameObject", "gameObject");
 

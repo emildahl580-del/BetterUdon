@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0
+
+### Added
+
+- Cross-behaviour method calls with arguments and return values: `int hits = other.GetHits()` and
+  `other.Add(3)` work synchronously. The method body is inlined into the caller with the receiver
+  bound as `this`, so its field accesses become `GetProgramVariable`/`SetProgramVariable` on the
+  receiver. Nested calls and private fields work; the body runs immediately.
+- Cross-behaviour properties: auto properties read and write their backing variable, properties with
+  accessor bodies are inlined like methods.
+- Inside an inlined body, `transform`, `gameObject`, `enabled`, `SendCustomEvent`,
+  `GetProgramVariable` and `SetProgramVariable` all act on the receiver rather than the caller.
+
+### Changed
+
+- Cross-behaviour calls are no longer raised as events (the 1.3.0 behaviour). They execute
+  synchronously; use `SendCustomEvent` explicitly when you want an asynchronous notification.
+
 ## 1.3.0
 
 ### Added

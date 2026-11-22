@@ -158,6 +158,10 @@ namespace BetterUdon.Editor
 
             if (symbol is IFieldSymbol field)
             {
+                // Inside an inlined body 'this' is the other behaviour, so its fields live in its heap.
+                if (IsRemoteMemberOf(field))
+                    return EmitReadBehaviourField(_remoteReceiver, field, identifier);
+
                 if (_fieldSlots.TryGetValue(field, out Slot fieldSlot))
                     return MaybeCloneStruct(fieldSlot);
 
@@ -169,24 +173,27 @@ namespace BetterUdon.Editor
                 }
 
                 // A bare identifier can only refer to a member of 'this'.
-                Slot instance = field.IsStatic ? null : _udonThisSlot;
+                Slot instance = field.IsStatic ? null : _thisSlot;
                 return ReadExternMember(instance, UdonExternSignatures.FieldGet(field), field.Type, identifier);
             }
 
             if (symbol is IPropertySymbol property)
             {
+                if (!property.IsStatic && IsRemoteMemberOf(property))
+                    return EmitRemotePropertyRead(property, identifier);
+
                 if (!property.IsStatic && TryGetBehaviourPropertySlot(property, out Slot propertyValueSlot))
                     return MaybeCloneStruct(propertyValueSlot);
 
                 // Implicit 'this' property with an explicit accessor body.
                 if (GetBackingField(property) == null && AccessorHasBody(property.GetMethod))
                 {
-                    Slot accessorInstance = property.IsStatic ? null : _udonThisSlot;
+                    Slot accessorInstance = property.IsStatic ? null : _thisSlot;
                     return MaybeCloneStruct(InlineMethod(property.GetMethod, accessorInstance, new List<Slot>(), identifier));
                 }
 
                 // Inherited Unity members such as transform, gameObject and enabled.
-                Slot instance = property.IsStatic ? null : _udonThisSlot;
+                Slot instance = property.IsStatic ? null : _thisSlot;
                 return ReadExternMember(instance, UdonExternSignatures.PropertyGet(property), property.Type, identifier);
             }
 
@@ -226,6 +233,10 @@ namespace BetterUdon.Editor
 
             if (symbol is IFieldSymbol field)
             {
+                // Inside an inlined remote body every member of 'this' belongs to the receiver.
+                if (IsRemoteMemberOf(field))
+                    return EmitReadBehaviourField(_remoteReceiver, field, memberAccess);
+
                 if (_fieldSlots.TryGetValue(field, out Slot fieldSlot) && IsBehaviourReceiver(receiverSyntax))
                     return MaybeCloneStruct(fieldSlot);
 
@@ -263,14 +274,27 @@ namespace BetterUdon.Editor
                     return NewSlot(property.Type, "bad");
                 }
 
+                // Inside an inlined remote body, 'this.Prop' is the receiver's property.
+                if (!property.IsStatic && IsRemoteMemberOf(property))
+                    return EmitRemotePropertyRead(property, memberAccess);
+
                 // Auto properties declared on the behaviour itself compile to their backing field.
                 if (!property.IsStatic && TryGetBehaviourPropertySlot(property, out Slot propertySlot))
                     return MaybeCloneStruct(propertySlot);
 
+                // A property on another behaviour is read from its heap (auto property) or by inlining
+                // its accessor with that behaviour as 'this'.
                 if (!property.IsStatic && !IsBehaviourReceiver(receiverSyntax) && DerivesFromBetterUdon(property.ContainingType))
                 {
-                    AddError($"'{property.Name}' is a property of another behaviour. Only public variables are visible " +
-                             "across behaviours; store the value in a public field or raise a custom event.", memberAccess);
+                    Slot receiver = EmitExpression(receiverSyntax);
+
+                    if (GetBackingField(property) != null)
+                        return EmitReadBehaviourMember(receiver, property.Name, property.Type, memberAccess);
+
+                    if (AccessorHasBody(property.GetMethod))
+                        return MaybeCloneStruct(InlineRemoteMethod(property.GetMethod, receiver, new List<Slot>(), memberAccess));
+
+                    AddError($"'{property.Name}' is a property of another behaviour that has no body to inline.", memberAccess);
                     return NewSlot(property.Type, "bad");
                 }
 
@@ -961,6 +985,21 @@ namespace BetterUdon.Editor
                         return true;
                     }
 
+                    if (symbol is IFieldSymbol remoteField && IsRemoteMemberOf(remoteField))
+                    {
+                        IFieldSymbol captured = remoteField;
+                        lvalue = new CallbackLValue(captured.Type,
+                            clone => EmitReadBehaviourField(_remoteReceiver, captured, identifier, clone),
+                            value => EmitWriteBehaviourField(_remoteReceiver, captured, value, identifier));
+                        return true;
+                    }
+
+                    if (symbol is IPropertySymbol remoteProperty && !remoteProperty.IsStatic && IsRemoteMemberOf(remoteProperty))
+                    {
+                        lvalue = CreateRemotePropertyLValue(remoteProperty, identifier);
+                        return true;
+                    }
+
                     if (symbol is IFieldSymbol field && _fieldSlots.TryGetValue(field, out Slot fieldSlot))
                     {
                         lvalue = new SlotLValue(this, fieldSlot);
@@ -983,7 +1022,7 @@ namespace BetterUdon.Editor
                     if (symbol is IPropertySymbol accessorProperty && GetBackingField(accessorProperty) == null &&
                         (AccessorHasBody(accessorProperty.GetMethod) || AccessorHasBody(accessorProperty.SetMethod)))
                     {
-                        Slot accessorReceiver = accessorProperty.IsStatic ? null : _udonThisSlot;
+                        Slot accessorReceiver = accessorProperty.IsStatic ? null : _thisSlot;
                         IPropertySymbol capturedProperty = accessorProperty;
 
                         lvalue = new CallbackLValue(accessorProperty.Type,
@@ -1015,7 +1054,7 @@ namespace BetterUdon.Editor
                     // Inherited Unity members such as enabled can be assigned through this.
                     if (symbol is IPropertySymbol externProperty && externProperty.SetMethod != null)
                     {
-                        Slot instance = externProperty.IsStatic ? null : _udonThisSlot;
+                        Slot instance = externProperty.IsStatic ? null : _thisSlot;
                         lvalue = new ExternMemberLValue(this, instance,
                             UdonExternSignatures.PropertyGet(externProperty), UdonExternSignatures.PropertySet(externProperty), externProperty.Type);
                         return true;
@@ -1023,7 +1062,7 @@ namespace BetterUdon.Editor
 
                     if (symbol is IFieldSymbol externField && !externField.IsStatic)
                     {
-                        lvalue = new ExternMemberLValue(this, _udonThisSlot,
+                        lvalue = new ExternMemberLValue(this, _thisSlot,
                             UdonExternSignatures.FieldGet(externField), UdonExternSignatures.FieldSet(externField), externField.Type);
                         return true;
                     }
@@ -1062,6 +1101,15 @@ namespace BetterUdon.Editor
 
                     if (symbol is IFieldSymbol field)
                     {
+                        if (!field.IsStatic && IsRemoteMemberOf(field))
+                        {
+                            IFieldSymbol captured = field;
+                            lvalue = new CallbackLValue(captured.Type,
+                                clone => EmitReadBehaviourField(_remoteReceiver, captured, memberAccess, clone),
+                                value => EmitWriteBehaviourField(_remoteReceiver, captured, value, memberAccess));
+                            return true;
+                        }
+
                         // Only this behaviour's own instance maps to a heap slot; another instance of
                         // the same type has its own heap.
                         if (_fieldSlots.TryGetValue(field, out Slot fieldSlot) && IsBehaviourReceiver(memberAccess.Expression))
@@ -1102,6 +1150,12 @@ namespace BetterUdon.Editor
 
                     if (symbol is IPropertySymbol property)
                     {
+                        if (!property.IsStatic && IsRemoteMemberOf(property))
+                        {
+                            lvalue = CreateRemotePropertyLValue(property, memberAccess);
+                            return true;
+                        }
+
                         if (!property.IsStatic && IsBehaviourReceiver(memberAccess.Expression) &&
                             TryGetBehaviourPropertySlot(property, out Slot propertySlot))
                         {
@@ -1112,8 +1166,25 @@ namespace BetterUdon.Editor
                         if (!property.IsStatic && !IsBehaviourReceiver(memberAccess.Expression) &&
                             DerivesFromBetterUdon(property.ContainingType))
                         {
-                            AddError($"'{property.Name}' is a property of another behaviour. Only public variables are " +
-                                     "writable across behaviours; use a public field or raise a custom event.", memberAccess);
+                            Slot receiver = EmitExpression(memberAccess.Expression);
+
+                            if (GetBackingField(property) != null)
+                            {
+                                lvalue = new CallbackLValue(property.Type,
+                                    clone => EmitReadBehaviourMember(receiver, property.Name, property.Type, memberAccess),
+                                    value => EmitWriteBehaviourMember(receiver, property.Name, ConvertTo(value, property.Type)));
+                                return true;
+                            }
+
+                            if (AccessorHasBody(property.SetMethod))
+                            {
+                                lvalue = new CallbackLValue(property.Type,
+                                    clone => MaybeCloneStruct(InlineRemoteMethod(property.GetMethod, receiver, new List<Slot>(), memberAccess)),
+                                    value => InlineRemoteMethod(property.SetMethod, receiver, new List<Slot> { value }, memberAccess));
+                                return true;
+                            }
+
+                            AddError($"'{property.Name}' is a property of another behaviour that has no body to inline.", memberAccess);
                             return false;
                         }
 
