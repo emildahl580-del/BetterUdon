@@ -435,8 +435,9 @@ namespace BetterUdon.Editor
             if (_parameterSlots.TryGetValue(name, out Slot existing))
                 return existing;
 
-            Slot slot = NewSlot(type, name);
-            // Event arguments are written by the VM before the entry point runs.
+            // The VM writes event arguments by their exact symbol name (onPlayerJoinedPlayer,
+            // amount__param, ...), so the heap variable cannot use the compiler's mangled names.
+            Slot slot = _asm.AddSlot(name, UdonTypeSystem.GetStorageTypeName(type), type);
             _parameterSlots.Add(name, slot);
             return slot;
         }
@@ -445,6 +446,20 @@ namespace BetterUdon.Editor
         {
             _asm.MarkEntryPoint(definition.UdonName);
             _exportedEntryPoints.Add(definition.UdonName);
+
+            if (IsRecursiveMethod(method))
+            {
+                if (method.Parameters.Length != 0)
+                {
+                    AddError($"'{method.Name}' is an Udon event with arguments, so it cannot be a [RecursiveMethod]. " +
+                             "Move the recursion into a separate method.", method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                    Halt();
+                    return;
+                }
+
+                EmitRecursiveEntryPointTrampoline(method);
+                return;
+            }
 
             if (method.Parameters.Length != definition.ArgumentSymbols.Length)
             {
@@ -505,6 +520,12 @@ namespace BetterUdon.Editor
 
             _asm.MarkEntryPoint(name);
             _exportedEntryPoints.Add(name);
+
+            if (IsRecursiveMethod(method))
+            {
+                EmitRecursiveEntryPointTrampoline(method);
+                return;
+            }
 
             ReturnContext returnContext = new ReturnContext { EndLabel = NewLabel("methodEnd") };
 

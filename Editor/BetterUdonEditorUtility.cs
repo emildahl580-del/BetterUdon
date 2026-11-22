@@ -68,24 +68,31 @@ namespace BetterUdon.Editor
             if (behaviour == null)
                 return null;
 
+            Type behaviourType = behaviour.GetType();
+            BetterUdonProgramAsset programAsset = GetProgramAsset(behaviourType);
+
             UdonBehaviour udonBehaviour = behaviour.udonBehaviour;
+
+            // A GameObject can host several BetterUdon behaviours, so the backing belongs to this
+            // proxy's program, not "the UdonBehaviour on this object".
+            if (udonBehaviour == null || (programAsset != null && udonBehaviour.programSource != programAsset))
+            {
+                udonBehaviour = programAsset != null
+                    ? FindBackingBehaviour(behaviour, programAsset)
+                    : null;
+            }
 
             if (udonBehaviour == null)
             {
-                udonBehaviour = behaviour.GetComponent<UdonBehaviour>();
+                udonBehaviour = behaviour.gameObject.AddComponent<UdonBehaviour>();
+                udonBehaviour.hideFlags = HideFlags.HideInInspector;
+            }
 
-                if (udonBehaviour == null)
-                {
-                    udonBehaviour = behaviour.gameObject.AddComponent<UdonBehaviour>();
-                    udonBehaviour.hideFlags = HideFlags.HideInInspector;
-                }
-
+            if (!ReferenceEquals(behaviour.udonBehaviour, udonBehaviour))
+            {
                 behaviour.udonBehaviour = udonBehaviour;
                 EditorUtility.SetDirty(behaviour);
             }
-
-            Type behaviourType = behaviour.GetType();
-            BetterUdonProgramAsset programAsset = GetProgramAsset(behaviourType);
 
             if (programAsset == null)
                 return udonBehaviour;
@@ -115,6 +122,20 @@ namespace BetterUdon.Editor
                 udonBehaviour.enabled = behaviour.enabled;
 
             return udonBehaviour;
+        }
+
+        /// <summary>
+        /// Finds the backing UdonBehaviour for a proxy: the one whose program is this proxy's asset.
+        /// </summary>
+        private static UdonBehaviour FindBackingBehaviour(BetterUdonBehaviour behaviour, BetterUdonProgramAsset programAsset)
+        {
+            foreach (UdonBehaviour candidate in behaviour.GetComponents<UdonBehaviour>())
+            {
+                if (candidate != null && ReferenceEquals(candidate.programSource, programAsset))
+                    return candidate;
+            }
+
+            return null;
         }
 
         /// <summary>

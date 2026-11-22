@@ -112,10 +112,20 @@ namespace BetterUdon.Editor
                 .Where(m => !m.IsStatic && m.MethodKind == MethodKind.Ordinary && !m.IsImplicitlyDeclared)
                 .ToList();
 
+            // Recursive methods are compiled as blocks before anything can jump to them.
+            PrepareRecursiveMethods(methods);
+            EmitRecursiveMethodBlocks(methods);
+
             foreach (IMethodSymbol method in methods)
             {
                 if (IsCompilerIntrinsic(method))
                     continue;
+
+                if (IsNetworkCallable(method))
+                {
+                    TryEmitNetworkCallableEntryPoint(method);
+                    continue;
+                }
 
                 if (UdonRegistry.Instance.TryGetEvent(method.Name, out UdonEventDefinition eventDefinition))
                 {

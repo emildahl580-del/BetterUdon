@@ -39,6 +39,9 @@ namespace BetterUdon.Editor
         public List<BetterUdonStructTypeInfo> StructTypes = new List<BetterUdonStructTypeInfo>();
         public uint HeapSize;
 
+        /// <summary>Metadata for <c>[NetworkCallable]</c> entry points, stored with the program.</summary>
+        public VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[] NetworkMetadata;
+
         /// <summary>True when at least one field is marked with <c>[BetterUdonSynced]</c>.</summary>
         public bool HasSyncedVariables;
 
@@ -204,6 +207,7 @@ namespace BetterUdon.Editor
             result.HasSyncedVariables = generator.HasSyncedVariables;
             result.SyncNeedsContinuous = generator.SyncNeedsContinuous;
             result.SyncModeOverride = generator.SyncModeOverride;
+            result.NetworkMetadata = generator.NetworkMetadata.ToArray();
 
             if (result.Diagnostics.Count == 0)
                 result.Assembly = assembly;

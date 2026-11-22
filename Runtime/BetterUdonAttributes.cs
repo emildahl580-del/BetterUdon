@@ -67,6 +67,15 @@ namespace BetterUdon
     }
 
     /// <summary>
+    /// Allows the method to call itself. Udon has no call stack, so marked methods are compiled as a
+    /// jumpable block with a manual frame stack; unmarked recursion is a compile error.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method)]
+    public sealed class RecursiveMethodAttribute : Attribute
+    {
+    }
+
+    /// <summary>
     /// Prevents a public field from being turned into an Udon entry point / inspector field.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field)]

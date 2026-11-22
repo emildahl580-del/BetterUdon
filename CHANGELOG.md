@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- `[RecursiveMethod]`: the method is compiled once as a labelled block. A call pushes its return
+  address on Udon's evaluation stack, jumps to the block, and the block returns with `JUMP_INDIRECT`.
+  Re-entering the block saves the caller's live slots on a growable heap stack and restores them
+  afterwards, so direct recursion (and deep recursion) works with the usual semantics.
+- Several BetterUdon behaviours can live on one GameObject. Each proxy gets its own backing
+  `UdonBehaviour`, and a typed `GetComponent<T>()` scans the components and returns the one whose
+  hidden type marker matches, or null.
+- `[NetworkCallable]` network events with parameters: up to eight arguments, validated like
+  UdonSharp's (public, non-static, void, no `ref`/`out`/`params`/defaults, no overloads), with the
+  entry point's parameter symbols and the client metadata kept in sync.
+
+### Fixed
+
+- Event and network parameters were bound to mangled heap names, so arguments delivered by the VM
+  (`onPlayerJoinedPlayer`, `amount__param`, ...) never reached the method. Parameter symbols now use
+  the exact names the VM writes.
+- Existing scenes keep working: a proxy now looks up the backing with its own program asset instead of
+  taking the first `UdonBehaviour` on the object.
+
 ## 1.5.0
 
 Closes the remaining UdonSharp API gaps (recursion and multiple behaviours per GameObject are still

@@ -15,6 +15,8 @@ namespace BetterUdon.Editor
         private ITypeSymbol _boolType => _model.Compilation.GetSpecialType(SpecialType.System_Boolean);
         private ITypeSymbol _objectType => _model.Compilation.GetSpecialType(SpecialType.System_Object);
         private ITypeSymbol _stringType => _model.Compilation.GetSpecialType(SpecialType.System_String);
+        private ITypeSymbol _uintType => _model.Compilation.GetSpecialType(SpecialType.System_UInt32);
+        private ITypeSymbol _objectArrayType => _model.Compilation.CreateArrayTypeSymbol(_objectType);
 
         private Slot ArrayLength(Slot collection)
         {

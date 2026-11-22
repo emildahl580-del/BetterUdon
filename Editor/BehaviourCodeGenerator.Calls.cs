@@ -226,6 +226,27 @@ namespace BetterUdon.Editor
             if (method.ReducedFrom != null && instance != null)
                 arguments.Insert(0, instance);
 
+            if (isUserMethod && IsRecursiveMethod(method))
+            {
+                bool selfCall = SymbolEqualityComparer.Default.Equals(_currentRecursiveBlock, method);
+
+                if (!selfCall && _currentRecursiveBlock != null)
+                {
+                    AddError($"'{method.Name}' is recursive; calling it from inside another recursive method is not supported.", invocation);
+                    return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
+                }
+
+                if (!selfCall && instance != null && !IsThisReceiver(invocation))
+                {
+                    AddError($"'{method.Name}' is recursive, so it cannot be called on another behaviour.", invocation);
+                    return method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
+                }
+
+                return selfCall
+                    ? EmitRecursiveSelfCall(method, arguments, invocation)
+                    : EmitRecursiveEntryCall(method, arguments, invocation);
+            }
+
             if (isUserMethod)
             {
                 ITypeSymbol containingType = method.ContainingType;
@@ -428,6 +449,14 @@ namespace BetterUdon.Editor
                 ? EmitExpression(memberAccess.Expression)
                 : _thisSlot;
 
+            // A GameObject can host several behaviours, so a typed lookup scans the UdonBehaviours and
+            // picks the one whose type marker matches.
+            if (isBehaviour)
+            {
+                result = EmitFindBehaviour(instance, containingTypeName, typeArgument, invocation);
+                return true;
+            }
+
             Slot typeSlot = ConstantSlot(_systemTypeSymbol, systemType, "SystemType");
             Slot componentSlot = NewSlot(_componentTypeSymbol, "component");
 
@@ -436,13 +465,78 @@ namespace BetterUdon.Editor
             _asm.Push(componentSlot);
             Extern(signature, $"'{method.Name}<{typeArgument.Name}>'");
 
-            // The lookup returns whichever UdonBehaviour is on the object, so a concrete behaviour type
-            // is verified against the type marker before it is handed back.
-            if (isBehaviour && typeArgument.ToDisplayString() != BetterUdonBaseTypeName)
-                EmitBehaviourTypeCheck(componentSlot, typeArgument, invocation);
-
             result = ConvertTo(componentSlot, method.ReturnType);
             return true;
+        }
+
+        /// <summary>
+        /// Finds the UdonBehaviour whose hidden type marker is <paramref name="typeArgument"/>, scanning
+        /// every UdonBehaviour on the object (a GameObject may host several BetterUdon behaviours).
+        /// </summary>
+        private Slot EmitFindBehaviour(Slot instance, string containingTypeName, ITypeSymbol typeArgument, SyntaxNode node)
+        {
+            ITypeSymbol componentArrayType = _model.Compilation.CreateArrayTypeSymbol(_componentTypeSymbol);
+            bool anyBehaviour = typeArgument.ToDisplayString() == BetterUdonBaseTypeName;
+
+            string lookupType = containingTypeName == "UnityEngineGameObject"
+                ? "UnityEngineGameObject"
+                : "UnityEngineComponent";
+
+            Slot array = NewSlot(componentArrayType, "components");
+            Slot udonType = ConstantSlot(_systemTypeSymbol, typeof(VRC.Udon.UdonBehaviour), "SystemType");
+
+            _asm.Push(instance);
+            _asm.Push(udonType);
+            _asm.Push(array);
+            Extern($"{lookupType}.__GetComponents__SystemType__UnityEngineComponentArray", "GetComponents(UdonBehaviour)");
+
+            Slot result = NewSlot(_componentTypeSymbol, "component");
+            Copy(ConstantSlot(_objectType, null), result);
+
+            Slot length = NewSlot(_intType, "count");
+            _asm.Push(array);
+            _asm.Push(length);
+            Extern("UnityEngineComponentArray.__get_Length__SystemInt32", "component count");
+
+            Slot index = NewSlot(_intType, "index");
+            Copy(IntConstant(0), index);
+
+            string condition = NewLabel("componentCondition");
+            string end = NewLabel("componentEnd");
+            string next = NewLabel("componentNext");
+
+            _asm.MarkLabel(condition);
+            Slot isLess = EmitBinaryOperator(index, length, _intType, "op_LessThan", _boolType, node);
+            _asm.JumpIfFalse(isLess, end);
+
+            Slot candidate = NewSlot(_componentTypeSymbol, "candidate");
+            _asm.Push(array);
+            _asm.Push(index);
+            _asm.Push(candidate);
+            Extern("UnityEngineComponentArray.__Get__SystemInt32__UnityEngineComponent", "component read");
+
+            if (anyBehaviour)
+            {
+                Copy(candidate, result);
+                _asm.Jump(end);
+                return result;
+            }
+
+            Slot marker = EmitGetProgramVariable(candidate, TypeMarkerSymbol, "behaviour type");
+            Slot expected = ConstantSlot(_stringType, typeArgument.ToDisplayString());
+            Slot matches = EmitBinaryOperator(marker, expected, _stringType, "op_Equality", _boolType, node);
+
+            _asm.JumpIfFalse(matches, next);
+            Copy(candidate, result);
+            _asm.Jump(end);
+
+            _asm.MarkLabel(next);
+            Slot incremented = EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, null);
+            Copy(incremented, index);
+            _asm.Jump(condition);
+            _asm.MarkLabel(end);
+
+            return result;
         }
 
         private Slot EmitIntrinsic(IMethodSymbol method, InvocationExpressionSyntax invocation)
@@ -512,13 +606,33 @@ namespace BetterUdon.Editor
 
                 case "SendCustomNetworkEvent":
                 {
-                    // SendCustomNetworkEvent(NetworkEventTarget target, string eventName)
+                    // SendCustomNetworkEvent(NetworkEventTarget target, string eventName[, params object[]])
                     const string targetType = "VRCUdonCommonInterfacesNetworkEventTarget";
+
+                    int parameterCount = arguments.Count - 2;
+
+                    if (parameterCount > 8)
+                    {
+                        AddError("SendCustomNetworkEvent supports at most 8 parameters.", invocation);
+                        return null;
+                    }
+
+                    System.Text.StringBuilder networkSignature = new System.Text.StringBuilder();
+                    networkSignature.Append(UdonReceiverType).Append(".__SendCustomNetworkEvent__").Append(targetType).Append("_SystemString");
+
+                    for (int i = 0; i < parameterCount; i++)
+                        networkSignature.Append("_SystemObject");
+
+                    networkSignature.Append("__SystemVoid");
 
                     _asm.Push(receiver);
                     _asm.Push(arguments[0]);
                     _asm.Push(ConvertTo(arguments[1], _stringType));
-                    Extern($"{UdonReceiverType}.__SendCustomNetworkEvent__{targetType}_SystemString__SystemVoid", "SendCustomNetworkEvent");
+
+                    for (int i = 0; i < parameterCount; i++)
+                        _asm.Push(ConvertTo(arguments[i + 2], _objectType));
+
+                    Extern(networkSignature.ToString(), "SendCustomNetworkEvent");
                     return null;
                 }
 

@@ -46,6 +46,9 @@ namespace BetterUdon.Editor
 
         [NonSerialized] private List<CompileDiagnostic> _lastDiagnostics = new List<CompileDiagnostic>();
 
+        [NonSerialized] private VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[] _networkMetadata =
+            new VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[0];
+
         // Foldout state for the generated program. Not serialised: it only has to survive repaints.
         [NonSerialized] private bool _showPublicVariables;
         [NonSerialized] private bool _showAssembly;
@@ -118,6 +121,7 @@ namespace BetterUdon.Editor
                 hasSyncedVariables = result.HasSyncedVariables;
                 syncNeedsContinuous = result.SyncNeedsContinuous;
                 syncModeOverride = result.SyncModeOverride;
+                _networkMetadata = result.NetworkMetadata ?? new VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[0];
             }
 
             if (!result.Success)
@@ -287,6 +291,13 @@ namespace BetterUdon.Editor
 
                 exportedFieldTypes.Add(UdonTypeSystem.GetHeapType(value)?.AssemblyQualifiedName);
             }
+        }
+
+        protected override VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[] GetLastNetworkCallingMetadata()
+        {
+            return _networkMetadata != null && _networkMetadata.Length > 0
+                ? _networkMetadata
+                : new VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[0];
         }
 
         protected override object GetPublicVariableDefaultValue(string symbol, Type type)

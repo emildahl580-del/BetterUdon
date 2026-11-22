@@ -17,6 +17,12 @@ namespace BetterUdon.Editor
         public object InitialValue;
         public bool InitialIsThis;
 
+        /// <summary>
+        /// When set, the initial value becomes this label's bytecode address. Used for the return
+        /// address of recursive calls.
+        /// </summary>
+        public string AddressLabel;
+
         public Slot(string name, string udonType, Microsoft.CodeAnalysis.ITypeSymbol type)
         {
             Name = name;
@@ -125,6 +131,16 @@ namespace BetterUdon.Editor
 
         public void JumpIndirect(Slot addressSlot) => AddLine($"JUMP_INDIRECT, {addressSlot.Name}", SizeJumpIndirect);
 
+        /// <summary>
+        /// Copies the value whose address is on top of the evaluation stack into <paramref name="target"/>.
+        /// Used to receive the return address of a recursive call.
+        /// </summary>
+        public void CopyFromTop(Slot target)
+        {
+            Push(target);
+            AddLine("COPY", SizeCopy);
+        }
+
         public void Extern(string signature)
         {
             _externSignatures.Add(signature);
@@ -162,6 +178,14 @@ namespace BetterUdon.Editor
         public string BuildAssembly()
         {
             StringBuilder builder = new StringBuilder();
+
+            // Label addresses are final once every instruction has been added, so address constants can
+            // be resolved before the data section is written.
+            foreach (Slot slot in _slots)
+            {
+                if (!string.IsNullOrEmpty(slot.AddressLabel))
+                    slot.InitialValue = _labels.TryGetValue(slot.AddressLabel, out uint address) ? (object)address : 0u;
+            }
 
             builder.Append(".data_start\n");
 

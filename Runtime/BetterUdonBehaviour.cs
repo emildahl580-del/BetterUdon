@@ -12,7 +12,6 @@ namespace BetterUdon
     ///
     /// Unlike UdonSharp, BetterUdon supports user defined <c>struct</c> types with real value semantics.
     /// </summary>
-    [DisallowMultipleComponent]
     [AddComponentMenu("BetterUdon/Better Udon Behaviour")]
     public class BetterUdonBehaviour : MonoBehaviour
     {
@@ -91,6 +90,30 @@ namespace BetterUdon
         {
             if (udonBehaviour != null)
                 udonBehaviour.SendCustomNetworkEvent(target, eventName);
+        }
+
+        public void SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget target, string eventName, object parameter0)
+        {
+            if (udonBehaviour != null)
+                udonBehaviour.SendCustomNetworkEvent(target, eventName, parameter0);
+        }
+
+        public void SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget target, string eventName, object parameter0, object parameter1)
+        {
+            if (udonBehaviour != null)
+                udonBehaviour.SendCustomNetworkEvent(target, eventName, parameter0, parameter1);
+        }
+
+        public void SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget target, string eventName, object parameter0, object parameter1, object parameter2)
+        {
+            if (udonBehaviour != null)
+                udonBehaviour.SendCustomNetworkEvent(target, eventName, parameter0, parameter1, parameter2);
+        }
+
+        public void SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget target, string eventName, object parameter0, object parameter1, object parameter2, object parameter3)
+        {
+            if (udonBehaviour != null)
+                udonBehaviour.SendCustomNetworkEvent(target, eventName, parameter0, parameter1, parameter2, parameter3);
         }
 
         /// <summary>

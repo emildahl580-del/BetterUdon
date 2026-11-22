@@ -360,6 +360,8 @@ public class Door : BetterUdonBehaviour
 - **`GameObject.GetComponent<T>()` works** for BetterUdon behaviours: the lookup is done on the
   backing `UdonBehaviour` and then verified against a hidden type marker, so a different behaviour on
   that object yields `null`, exactly like `GetComponent` should.
+- **A GameObject can host several BetterUdon behaviours.** Each has its own backing `UdonBehaviour`,
+  and a typed `GetComponent<T>()` scans them and returns the one whose type marker matches (or null).
 - **`GetComponentInChildren`/`InParent`** are rejected for behaviour types because Udon cannot search
   by behaviour type; pass the `GameObject` and call `GetComponent` on it.
 - **Explicit events remain available.** When the call must be asynchronous (a one-way notification, or
@@ -441,8 +443,22 @@ public class Doorbell : BetterUdonBehaviour
 
 `SendCustomNetworkEvent(NetworkEventTarget.All, "Open")` sends an event to the owner (`Owner`) or to
 every player (`All`). This works on any behaviour with a sync mode other than `None`, including
-`NoVariableSync` ones. Event parameters (the `[NetworkCallable]` / RPC-argument feature) are not
-emitted yet: events carry no arguments.
+`NoVariableSync` ones.
+
+Network calls can carry up to eight parameters when the receiver marks its entry point
+`[NetworkCallable]`:
+
+```csharp
+[NetworkCallable(30)]                 // max events per second
+public void Apply(int amount, string label) { ... }
+
+public void Send() => SendCustomNetworkEvent(NetworkEventTarget.All, nameof(Apply), 9, "net");
+```
+
+The compiler validates the same restrictions UdonSharp does (public, non-static, void, at most eight
+parameters, no `ref`/`out`, `params` or defaults, no overloads) and publishes the metadata the client
+uses to map arguments to heap variables. Each parameter is a symbol named `<name>__param`; the
+metadata carries the same names, so the receiving entry point reads exactly the values that were sent.
 
 #### Reacting to synced values
 
@@ -542,7 +558,10 @@ inside the editor against the real VM.
 
 Some limits are properties of the target and cannot be compiled away:
 
-- **No recursion.** There is no call stack; inlining is the only mechanism.
+- **Recursion needs `[RecursiveMethod]`.** A marked method is compiled as a jumpable block with a
+  manual frame stack, so it can call itself; unmarked recursion is still a compile error. Mutual
+  recursion between two marked methods, `ref`/`out` parameters on a recursive method, and calling a
+  recursive method on another behaviour are not supported.
 - **No open generics at runtime.** A `T` cannot escape into a field or a runtime-constructed type,
   because the heap has no per-slot type identity and the VM cannot instantiate a generic type.
 - **No delegates or lambdas.** No callable object model exists to attach them to.
