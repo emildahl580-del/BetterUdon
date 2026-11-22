@@ -857,7 +857,7 @@ namespace BetterUdon.Editor
 
                 _asm.MarkLabel(conditionLabel);
 
-                Slot isLess = EmitBinaryOperator(index, length, arrayType.ElementType, "op_LessThan", _intType, forEachStatement);
+                Slot isLess = EmitBinaryOperator(index, length, _intType, "op_LessThan", _boolType, forEachStatement);
                 _asm.JumpIfFalse(isLess, endLabel);
 
                 ArrayElementLValue elementAccess = new ArrayElementLValue(this, collection, index, collectionType, arrayType.ElementType);

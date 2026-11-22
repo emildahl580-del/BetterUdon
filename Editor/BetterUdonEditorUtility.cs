@@ -84,8 +84,15 @@ namespace BetterUdon.Editor
 
             if (udonBehaviour == null)
             {
-                udonBehaviour = behaviour.gameObject.AddComponent<UdonBehaviour>();
-                udonBehaviour.hideFlags = HideFlags.HideInInspector;
+                // Nothing to attach to yet (the program asset could not be created). Reuse whatever
+                // this proxy already had instead of adding a component on every pass.
+                udonBehaviour = behaviour.udonBehaviour;
+
+                if (udonBehaviour == null)
+                {
+                    udonBehaviour = behaviour.gameObject.AddComponent<UdonBehaviour>();
+                    udonBehaviour.hideFlags = HideFlags.HideInInspector;
+                }
             }
 
             if (!ReferenceEquals(behaviour.udonBehaviour, udonBehaviour))
@@ -129,9 +136,30 @@ namespace BetterUdon.Editor
         /// </summary>
         private static UdonBehaviour FindBackingBehaviour(BetterUdonBehaviour behaviour, BetterUdonProgramAsset programAsset)
         {
+            BetterUdonBehaviour[] proxies = behaviour.GetComponents<BetterUdonBehaviour>();
+
             foreach (UdonBehaviour candidate in behaviour.GetComponents<UdonBehaviour>())
             {
-                if (candidate != null && ReferenceEquals(candidate.programSource, programAsset))
+                if (candidate == null || !ReferenceEquals(candidate.programSource, programAsset))
+                    continue;
+
+                // Two proxies of the same type share a program asset, so a backing already claimed by
+                // another proxy on this object is not ours.
+                bool claimed = false;
+
+                foreach (BetterUdonBehaviour other in proxies)
+                {
+                    if (other == null || ReferenceEquals(other, behaviour))
+                        continue;
+
+                    if (ReferenceEquals(other.udonBehaviour, candidate))
+                    {
+                        claimed = true;
+                        break;
+                    }
+                }
+
+                if (!claimed)
                     return candidate;
             }
 

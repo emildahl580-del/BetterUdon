@@ -259,9 +259,7 @@ namespace BetterUdon.Editor
                 bool remoteCall = DerivesFromBetterUdon(containingType) && instance != null &&
                                   (!IsThisReceiver(invocation) || (InRemoteBody && IsRemoteMemberOf(method)));
 
-                if (!remoteCall &&
-                    !SymbolEqualityComparer.Default.Equals(containingType, _behaviourType) &&
-                    containingType.TypeKind != TypeKind.Struct)
+                if (!remoteCall && !IsOwnOrBaseType(containingType) && containingType.TypeKind != TypeKind.Struct)
                 {
                     AddError(DescribeUnsupportedCrossBehaviourCall(method), invocation);
                     return NewSlot(method.ReturnType, "bad");

@@ -127,6 +127,21 @@ namespace BetterUdon.Editor
                 UdonExternSignatures.PropertyGet(property), UdonExternSignatures.PropertySet(property), property.Type);
         }
 
+        /// <summary>
+        /// True for the behaviour's own type and its base behaviours: a base method is inlined like a
+        /// local one, and its fields are this behaviour's fields.
+        /// </summary>
+        private bool IsOwnOrBaseType(ITypeSymbol type)
+        {
+            for (INamedTypeSymbol current = _behaviourType; current != null; current = current.BaseType)
+            {
+                if (SymbolEqualityComparer.Default.Equals(current, type))
+                    return true;
+            }
+
+            return false;
+        }
+
         /// <summary>True when the receiver of an invocation is <c>this</c> (or omitted).</summary>
         private static bool IsThisReceiver(InvocationExpressionSyntax invocation)
         {

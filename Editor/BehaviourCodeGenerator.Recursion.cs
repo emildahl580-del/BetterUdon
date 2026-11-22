@@ -101,6 +101,10 @@ namespace BetterUdon.Editor
             {
                 info.ReturnSlot = NewSlot(method.ReturnType, "recRet");
                 returnContext.ReturnSlot = info.ReturnSlot;
+
+                // A frame push happens before the first return of this invocation, so the return slot
+                // must already hold a valid (default) value rather than null.
+                EmitDefaultValue(info.ReturnSlot, method.ReturnType);
             }
 
             IMethodSymbol previousBlock = _currentRecursiveBlock;
@@ -229,8 +233,31 @@ namespace BetterUdon.Editor
 
         private void EmitPushFrameValue(Slot value)
         {
+            Slot saved = value;
+
+            // Structs are reference arrays on the heap, so a frame slot can still be null (nothing has
+            // assigned it yet in this invocation). Copy only when there is a value to copy.
+            if (UdonTypeSystem.IsUserStruct(value.Type))
+            {
+                saved = NewSlot(value.Type, "recSave");
+                Copy(value, saved);
+
+                Slot isNull = EmitBinaryOperator(value, ConstantSlot(_objectType, null), _objectType,
+                    "op_Equality", _boolType, null);
+
+                string notNull = NewLabel("recSaveNotNull");
+                string done = NewLabel("recSaveDone");
+
+                _asm.JumpIfFalse(isNull, notNull);
+                _asm.Jump(done);
+
+                _asm.MarkLabel(notNull);
+                Copy(MaybeCloneStruct(value), saved);
+                _asm.MarkLabel(done);
+            }
+
             ArrayElementLValue element = new ArrayElementLValue(this, _recStack, _recStackAddress, _objectArrayType, _objectType);
-            element.Set(MaybeCloneStruct(value));
+            element.Set(saved);
 
             Slot next = EmitBinaryOperator(_recStackAddress, IntConstant(1), _intType, "op_Addition", _intType, null);
             Copy(next, _recStackAddress);
@@ -259,7 +286,9 @@ namespace BetterUdon.Editor
             string enough = NewLabel("recStackEnough");
             _asm.JumpIfFalse(full, enough);
 
-            Slot newCapacity = EmitBinaryOperator(capacity, IntConstant(2), _intType, "op_Multiply", _intType, null);
+            // Grow past what this frame needs: doubling a small stack is not enough for a method with
+            // hundreds of live slots.
+            Slot newCapacity = EmitBinaryOperator(needed, IntConstant(2), _intType, "op_Multiply", _intType, null);
             Slot newStack = NewSlot(_objectArrayType, "recStackNew");
 
             _asm.Push(newCapacity);

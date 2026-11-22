@@ -62,7 +62,7 @@ BetterUdon is a Unity package. Install it from the git repository:
    To pin a release, append the tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v1.6.0
+   https://github.com/emildahl580-del/BetterUdon.git#v1.6.1
    ```
 
 Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
@@ -72,7 +72,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-1.6.0.zip` from the
+- **Zip** — grab `BetterUdon-1.6.1.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 

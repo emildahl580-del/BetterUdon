@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.6.1
+
+Bug sweep across the language, struct, recursion and cross-behaviour paths.
+
+### Fixed
+
+- `foreach` over an **array** emitted an invalid `op_LessThan` extern (it used the element type and an
+  int result), so any array `foreach` failed to compile. It now compares the index.
+- Calls to **base-behaviour methods** (`BaseMethod()`, `base.BaseMethod()`) were rejected as
+  cross-behaviour calls. They are inlined like the behaviour's own methods.
+- A **recursive method returning a struct** crashed the VM: pushing a frame cloned the return slot
+  before any invocation had assigned it (a null `object[]`). Return slots are now initialised to their
+  default value, and frame pushes skip cloning when the slot is still null.
+- Recursive frame-stack growth doubled the *old* capacity, which could remain smaller than the frame;
+  it now grows past the size the frame needs.
+- Two proxies of the **same behaviour type on one GameObject** shared a single backing
+  `UdonBehaviour`. Backings are now claimed per proxy, and a behaviour without a program asset no
+  longer gets an extra `UdonBehaviour` on every setup pass.
+- `[NetworkCallable]` parameter variables are now named per method
+  (`Method_parameter__param`), so two network methods can reuse a parameter name with different types.
+
+### Verified during the sweep (no change needed)
+
+Struct copy semantics through locals, arrays, lists, params and recursion; `ref`/`out` structs;
+`List.Contains`/`IndexOf`/`Remove` with struct elements; ternary, string `switch`, `nameof`, compound
+assignment, multi-declarator `for`, `out var`, casts, `Mathf.Clamp`, `string.IsNullOrEmpty`.
+
 ## 1.6.0
 
 ### Added

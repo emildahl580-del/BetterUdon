@@ -123,6 +123,13 @@ namespace BetterUdon.Editor
 
                 if (IsNetworkCallable(method))
                 {
+                    if (IsRecursiveMethod(method))
+                    {
+                        AddError($"'{method.Name}' cannot be both [NetworkCallable] and [RecursiveMethod].",
+                            method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                        continue;
+                    }
+
                     TryEmitNetworkCallableEntryPoint(method);
                     continue;
                 }

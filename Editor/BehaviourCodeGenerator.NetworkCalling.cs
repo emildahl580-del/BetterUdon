@@ -59,7 +59,10 @@ namespace BetterUdon.Editor
                     return false;
                 }
 
-                parameters.Add(new NetworkCallingParameterMetadata(parameter.Name + "__param", parameterType));
+                // The name is per method so two network callables can use the same parameter name with
+                // different types without sharing a heap variable.
+                parameters.Add(new NetworkCallingParameterMetadata(
+                    method.Name + "_" + parameter.Name + "__param", parameterType));
             }
 
             _networkMetadata.Add(new NetworkCallingEntrypointMetadata(
@@ -74,7 +77,7 @@ namespace BetterUdon.Editor
             {
                 foreach (IParameterSymbol parameter in method.Parameters)
                 {
-                    Slot slot = GetParameterSlot(parameter.Name + "__param", parameter.Type);
+                    Slot slot = GetParameterSlot(method.Name + "_" + parameter.Name + "__param", parameter.Type);
                     _scopes[_scopes.Count - 1][parameter] = slot;
                 }
 
