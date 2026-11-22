@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 1.6.1**
+**Version 2.0.0-alpha1**
 
 ---
 
@@ -305,7 +305,7 @@ The same compiler-owned collection approach covers the other common containers:
 | `Queue<T>` | `[ T[] items, int count ]` | `Enqueue`, `Dequeue`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
 | `Stack<T>` | `[ T[] items, int count ]` | `Push`, `Pop`, `Peek`, `Count`, `Contains`, `Clear`, `ToArray` |
 | `HashSet<T>` | `[ T[] items, int count ]` | `Add`, `Remove`, `Contains`, `Count`, `Clear`, `ToArray` |
-| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `TryGetValue`, `Remove`, `Count`, `Clear` |
+| `Dictionary<K,V>` | `[ K[] keys, V[] values, int count ]` | indexer get/set, `Add`, `ContainsKey`, `TryGetValue`, `Remove`, `Count`, `Clear`, `TrimExcess`, `Keys`/`Values`, `KeyValuePair` foreach |
 
 Queue dequeue shifts the live elements down; stack uses the tail as its top; hash sets and dictionaries
 use member-wise equality and a linear scan rather than a hash table. That is slower than the BCL but
@@ -328,7 +328,9 @@ keeps equality correct for primitives and user structs without a custom runtime.
 | `?.` | null test plus guarded block; void forms produce no temporary |
 | `??` / `??=` | control flow |
 | `is null` / `is not null` | equality against an object-typed null constant |
+| `is` type / declaration / property patterns | closed-world type marker plus property reads |
 | `switch` / `when` | equality chain, guard evaluated after the match |
+| Switch expressions | arm tests and a result slot; constant, relational, `when` and discard arms |
 | `?:` | control flow, both branches converted to the result type |
 | `nameof(x)` | compile-time string |
 | String interpolation | concatenation with the string `op_Addition` extern |
@@ -747,26 +749,32 @@ Some limits remain:
   `[NetworkCallable]` cannot be combined with `[RecursiveMethod]` (section 6).
 - **No open generics at runtime.** A `T` cannot escape into a field or a runtime-constructed type,
   because the heap has no per-slot type identity and the VM cannot instantiate a generic type.
-- **No delegates or lambdas.** No callable object model exists to attach them to.
-- **No `try` / `catch`, `throw`, `async`, `yield`, `lock`, `unsafe`.**
+- **No `try` / `catch`, `throw`, `async`, `lock`, `unsafe`.** `yield` works for direct `foreach` over a
+  local iterator method; manual `IEnumerator` objects, `yield` inside `try`/`finally` and `async`/
+  `await` are out of scope.
 - **Generic limits.** Generic methods and generic structs are monomorphised. Generic classes and
   generic BetterUdonBehaviour components are not supported, and every instantiation must be visible at
-  compile time because Udon cannot construct a generic type at runtime. Constraints that call members
-  through an interface use closed-world dispatch.
+  compile time because Udon cannot construct a generic type at runtime. Numeric and user-struct
+  `IComparable<T>.CompareTo` constraints are supported; other constrained interface calls are pending.
 - **Collection limits.** `List<T>`, `Queue<T>`, `Stack<T>`, `HashSet<T>` and `Dictionary<K,V>` are
   compiler intrinsics. HashSet/Dictionary use linear scans rather than hashing. Dictionary
   `Keys`/`Values` and `List<T>.Capacity`/`TrimExcess` are supported; the Unity profile does not expose
   `Queue<T>.Capacity` or `Dictionary<K,V>.Capacity`. Collection field initialisers must be created in
   `Start`.
 - **Iterator limits.** `yield` works for direct `foreach` over a local iterator method. Manual
-  enumerators and `async`/`await` are not implemented yet.
+  enumerators and `async`/`await` are intentionally out of scope.
 - **Delegate limits.** `Action`, `Action<T>` and `Func<..., TResult>` method groups, non-capturing and
   capturing lambdas, multicast `+=`/`-=`, multi-subscriber events and cross-behaviour targets are
   supported. Closures snapshot captured values and write them back after invocation.
+- **Complexity budgets.** BetterUdon reports an error above 20,000 generated heap slots or 256
+  generic instantiations, and the inspector bar adds a 50,000 instruction-word guidance budget. These
+  are compiler guardrails, not hard Udon limits.
 - **Field initialisers must be compile-time constants, and some backings are not serialisable.**
   `new List<T>()` in a field declaration is rejected; create collections in `Start`. Auto property
   backings and collection fields are real heap variables but are not Unity-serialisable, so they start
   at their default value rather than an authored inspector value.
+- **Language-version blockers.** `record struct` needs C# 10 and list patterns need C# 11; this project
+  compiles as C# 9, so those syntaxes are unavailable.
 - **Unity object references are not baked into the program.** A `Renderer` or `UdonBehaviour[]` field
   is a public variable; the heap starts without it and Udon fills it from the behaviour's public
   variable table on load. Udon stores programs without an object table, so such values cannot be

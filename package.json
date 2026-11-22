@@ -1,9 +1,9 @@
 {
     "name": "com.betterudon",
     "displayName": "BetterUdon",
-    "version": "1.6.1",
+    "version": "2.0.0-alpha1",
     "unity": "2022.3",
-    "description": "A C# to Udon assembly compiler for VRChat worlds. Supports user defined structs with value semantics, List<T>, ref/out parameters, local functions, network sync and more.",
+    "description": "A C# to Udon assembly compiler for VRChat worlds with user-defined structs, collections, generics, recursion, delegates, iterators, virtual dispatch, network sync and more.",
     "keywords": [
         "vrchat",
         "udon",
@@ -15,9 +15,9 @@
         "name": "Pedry",
         "url": "https://github.com/emildahl580-del"
     },
-    "documentationUrl": "https://github.com/emildahl580-del/BetterUdon/blob/main/Documentation~/index.md",
-    "changelogUrl": "https://github.com/emildahl580-del/BetterUdon/blob/main/CHANGELOG.md",
-    "licensesUrl": "https://github.com/emildahl580-del/BetterUdon/blob/main/LICENSE.md",
+    "documentationUrl": "https://github.com/emildahl580-del/BetterUdon/blob/v2.0.0-alpha1/Documentation~/index.md",
+    "changelogUrl": "https://github.com/emildahl580-del/BetterUdon/blob/v2.0.0-alpha1/CHANGELOG.md",
+    "licensesUrl": "https://github.com/emildahl580-del/BetterUdon/blob/v2.0.0-alpha1/LICENSE.md",
     "vpmDependencies": {
         "com.vrchat.worlds": ">=3.5.0"
     }

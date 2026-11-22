@@ -79,11 +79,19 @@ BetterUdon is a Unity package. Install it from the git repository:
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   To pin a release, append the tag:
+   The feature-expansion release is available from the `v2.0.0-alpha1` tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v1.6.1
+   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0-alpha1
    ```
+
+   To follow the branch directly instead of a pinned release:
+
+   ```
+   https://github.com/emildahl580-del/BetterUdon.git#feature-expansion
+   ```
+
+   `main` still tracks the earlier stable line until the expansion is merged.
 
 Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
 `vpmDependencies` entry, so VCC and the package manager understand the requirement).
@@ -92,7 +100,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-1.6.1.zip` from the
+- **Zip** — grab `BetterUdon-2.0.0-alpha1.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 
@@ -192,15 +200,19 @@ Udon stores the sync mode on the GameObject, not on the behaviour: setting it ap
 
 Recursion without `[RecursiveMethod]`, runtime/open generics, generic classes and generic behaviour
 components, `try`/`catch`, `async`/`await`, manual `IEnumerator` objects and `yield` inside
-`try`/`finally`. Capturing closures snapshot their values rather than sharing the original variable.
-These are tracked in `Documentation~/aot-expansion.md`.
+`try`/`finally`. `record struct` and list patterns require C# 10/11, while the project compiles as
+C# 9. Capturing closures snapshot their values rather than sharing the original variable. These are
+tracked in `Documentation~/aot-expansion.md`.
 
 ## What's new
 
-**1.6.1** is a bug sweep: array `foreach`, base-behaviour method calls, recursive methods returning a
-struct, frame-stack growth and backing selection for two components of the same type on one object are
-all fixed. **1.6.0** added `[RecursiveMethod]`, several behaviours per GameObject and
-`[NetworkCallable]` parameters. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+**2.0.0-alpha1** is the AOT feature expansion: mutual recursion, monomorphised generic methods and structs,
+closed-world virtual/interface dispatch (methods, properties and indexers), `Queue`/`Stack`/`HashSet`/
+`Dictionary` including `TryGetValue`, `Keys`/`Values` and `TrimExcess`, synchronous iterators,
+multicast delegates/events with capturing lambdas and cross-behaviour targets, type/declaration/property
+patterns, switch expressions and a complexity bar in the inspector. See
+[CHANGELOG.md](CHANGELOG.md) for the full history and `Documentation~/aot-expansion.md` for the
+remaining language-level limits.
 
 ## Documentation
 
