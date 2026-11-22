@@ -125,12 +125,32 @@ namespace BetterUdon.Editor
         /// </summary>
         private static void ApplySyncMode(UdonBehaviour udonBehaviour, BetterUdonProgramAsset programAsset)
         {
-            if (!programAsset.HasSyncedVariables)
-                return;
+            VRC.SDKBase.Networking.SyncType desired;
 
-            VRC.SDKBase.Networking.SyncType desired = programAsset.SyncNeedsContinuous
-                ? VRC.SDKBase.Networking.SyncType.Continuous
-                : VRC.SDKBase.Networking.SyncType.Manual;
+            switch (programAsset.SyncModeOverride)
+            {
+                case 1: // None
+                    desired = VRC.SDKBase.Networking.SyncType.None;
+                    break;
+
+                case 2: // NoVariableSync: network events need a mode, nothing is synced
+                case 3: // Continuous
+                    desired = VRC.SDKBase.Networking.SyncType.Continuous;
+                    break;
+
+                case 4: // Manual
+                    desired = VRC.SDKBase.Networking.SyncType.Manual;
+                    break;
+
+                default: // Any: derive from the synced fields
+                    if (!programAsset.HasSyncedVariables)
+                        return;
+
+                    desired = programAsset.SyncNeedsContinuous
+                        ? VRC.SDKBase.Networking.SyncType.Continuous
+                        : VRC.SDKBase.Networking.SyncType.Manual;
+                    break;
+            }
 
             if (udonBehaviour.SyncMethod == desired)
                 return;

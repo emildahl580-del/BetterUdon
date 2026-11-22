@@ -40,6 +40,10 @@ namespace BetterUdon.Editor
         [SerializeField, HideInInspector]
         private bool syncNeedsContinuous;
 
+        // 0 Any, 1 None, 2 NoVariableSync, 3 Continuous, 4 Manual (BetterUdonBehaviourSyncMode).
+        [SerializeField, HideInInspector]
+        private int syncModeOverride;
+
         [NonSerialized] private List<CompileDiagnostic> _lastDiagnostics = new List<CompileDiagnostic>();
 
         // Foldout state for the generated program. Not serialised: it only has to survive repaints.
@@ -61,6 +65,12 @@ namespace BetterUdon.Editor
         /// than the manual mode used otherwise.
         /// </summary>
         public bool SyncNeedsContinuous => syncNeedsContinuous;
+
+        /// <summary>
+        /// Forced sync mode from <c>[BetterUdonBehaviourSyncMode]</c>: 0 Any, 1 None, 2 NoVariableSync,
+        /// 3 Continuous, 4 Manual.
+        /// </summary>
+        public int SyncModeOverride => syncModeOverride;
 
         public void SetSource(MonoScript script, string typeName)
         {
@@ -107,6 +117,7 @@ namespace BetterUdon.Editor
             {
                 hasSyncedVariables = result.HasSyncedVariables;
                 syncNeedsContinuous = result.SyncNeedsContinuous;
+                syncModeOverride = result.SyncModeOverride;
             }
 
             if (!result.Success)
@@ -171,11 +182,13 @@ namespace BetterUdon.Editor
                 uint address = program.SymbolTable.GetAddressFromSymbol(pair.Key);
                 Type valueType = UdonTypeSystem.GetHeapType(pair.Value);
 
-                // Struct defaults are object[] values in a SystemObject slot. Declaring the heap
-                // variable as an array type instead makes Udon's serialiser lose the symbol table when
-                // the program is read back, so such slots keep the type the symbol already declares.
-                if (pair.Value is Array && program.SymbolTable.GetSymbolType(pair.Key) == typeof(object))
-                    valueType = typeof(object);
+                // Prefer the type the symbol already declares. Udon's serialiser loses the symbol table
+                // for some heap type/value combinations (array types, boxed enums next to strings), and
+                // the declared type is the one the program itself expects anyway.
+                Type symbolType = program.SymbolTable.GetSymbolType(pair.Key);
+
+                if (symbolType != null)
+                    valueType = symbolType;
 
                 try
                 {

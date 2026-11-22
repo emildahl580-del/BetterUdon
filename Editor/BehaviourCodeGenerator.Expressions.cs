@@ -53,6 +53,16 @@ namespace BetterUdon.Editor
 
             expression = Unwrap(expression);
 
+            // nameof(...) is an invocation node but a compile time string.
+            if (expression is InvocationExpressionSyntax nameOf &&
+                nameOf.Expression is IdentifierNameSyntax nameOfIdentifier &&
+                nameOfIdentifier.Identifier.ValueText == "nameof")
+            {
+                Optional<object> nameOfValue = GetConstantValue(nameOf);
+                object text = nameOfValue.HasValue ? nameOfValue.Value : nameOfIdentifier.Identifier.ValueText;
+                return EmitConstant(null, text, _stringType);
+            }
+
             if (expression is DefaultExpressionSyntax defaultExpression)
             {
                 ITypeSymbol defaultType = GetType(defaultExpression) ?? GetTypeInfo(defaultExpression.Type).Type;

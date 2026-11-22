@@ -262,6 +262,29 @@ namespace BetterUdon.Editor
             return element;
         }
 
+        /// <summary>
+        /// Runs the <c>OnChange</c> method or property setter of every synced field after values have
+        /// been unpacked, like UdonSharp's <c>FieldChangeCallback</c>.
+        /// </summary>
+        private void EmitSyncedCallbacks()
+        {
+            foreach (SyncedCallback callback in _syncedCallbacks)
+            {
+                if (!_fieldSlots.TryGetValue(callback.Field, out Slot fieldSlot))
+                    continue;
+
+                if (callback.Property != null)
+                {
+                    InlineMethod(callback.Property.SetMethod, _udonThisSlot,
+                        new List<Slot> { MaybeCloneStruct(fieldSlot) }, null);
+                }
+                else if (callback.Method != null)
+                {
+                    InlineMethod(callback.Method, _udonThisSlot, new List<Slot>(), null);
+                }
+            }
+        }
+
         #endregion
 
         #region Unpacking

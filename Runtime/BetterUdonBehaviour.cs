@@ -83,6 +83,17 @@ namespace BetterUdon
         }
 
         /// <summary>
+        /// Sends a networked event: the named entry point runs on the owner or on every player,
+        /// depending on <paramref name="target"/>. The behaviour needs a synchronisation mode other
+        /// than <c>None</c>.
+        /// </summary>
+        public void SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget target, string eventName)
+        {
+            if (udonBehaviour != null)
+                udonBehaviour.SendCustomNetworkEvent(target, eventName);
+        }
+
+        /// <summary>
         /// Sends the synced variables of this behaviour to the other players. Only has an effect when
         /// the local player owns the object and the behaviour uses manual synchronisation, which is
         /// what a field marked with <see cref="BetterUdonSyncedAttribute"/> selects.

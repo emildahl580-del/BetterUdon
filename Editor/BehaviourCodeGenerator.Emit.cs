@@ -461,9 +461,13 @@ namespace BetterUdon.Editor
                 returnContext.ReturnSlot = returnValue;
             }
 
-            // The structs have to reflect the values that just arrived before user code runs.
+            // The structs have to reflect the values that just arrived before user code runs, and the
+            // OnChange callbacks fire before the user's handler sees the new state.
             if (definition.UdonName == "_onDeserialization")
+            {
                 EmitUnpackSyncedStructs();
+                EmitSyncedCallbacks();
+            }
 
             using (PushScope())
             {

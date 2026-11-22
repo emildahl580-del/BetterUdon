@@ -416,6 +416,53 @@ The behaviour's sync mode is set on the backing `UdonBehaviour` when the program
 when it has plain synced variables, continuous when any field asks for interpolation. Programs without
 synced variables are left alone, since `SendCustomNetworkEvent` also needs a sync mode.
 
+#### Choosing the mode
+
+`[BetterUdonBehaviourSyncMode(...)]` forces it, like UdonSharp's attribute of the same name:
+
+```csharp
+[BetterUdonBehaviourSyncMode(BetterUdonBehaviourSyncMode.NoVariableSync)]
+public class Doorbell : BetterUdonBehaviour
+{
+    public void Ring() => SendCustomNetworkEvent(NetworkEventTarget.All, nameof(OnRung));
+    public void OnRung() { }
+}
+```
+
+| Mode | Effect |
+| --- | --- |
+| `Any` | default: derived from the synced fields |
+| `Manual` | forces manual sync; interpolation is rejected |
+| `Continuous` | forces continuous sync; arrays and structs are rejected |
+| `None` | nothing is synced and network events cannot be sent |
+| `NoVariableSync` | no synced variables, but network events still work |
+
+#### Network events
+
+`SendCustomNetworkEvent(NetworkEventTarget.All, "Open")` sends an event to the owner (`Owner`) or to
+every player (`All`). This works on any behaviour with a sync mode other than `None`, including
+`NoVariableSync` ones. Event parameters (the `[NetworkCallable]` / RPC-argument feature) are not
+emitted yet: events carry no arguments.
+
+#### Reacting to synced values
+
+`OnChange` names a parameterless method or a property setter that runs after values arrive, like
+UdonSharp's `FieldChangeCallback`:
+
+```csharp
+[BetterUdonSynced(OnChange = nameof(OnHealthChanged))] public int health;
+
+private void OnHealthChanged()
+{
+    // health already holds the value that arrived
+    UpdateBar();
+}
+```
+
+The callback runs on `OnDeserialization`, after struct mirrors are unpacked and before the user's
+`OnDeserialization` body. A direct `SetProgramVariable` writes the heap without running it (Udon has no
+property-change hook on the heap).
+
 `OnPreSerialization`, `OnDeserialization(DeserializationResult)` and
 `OnPostSerialization(SerializationResult)` are ordinary Udon events, so overriding them becomes an
 entry point. None of them are required for sync to work. Note that an owner does not receive its own

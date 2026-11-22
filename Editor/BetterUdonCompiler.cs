@@ -48,6 +48,12 @@ namespace BetterUdon.Editor
         /// </summary>
         public bool SyncNeedsContinuous;
 
+        /// <summary>
+        /// Forced sync mode from <c>[BetterUdonBehaviourSyncMode]</c>: 0 Any, 1 None, 2 NoVariableSync,
+        /// 3 Continuous, 4 Manual.
+        /// </summary>
+        public int SyncModeOverride;
+
         public bool Success => Assembly != null && Diagnostics.Count == 0;
     }
 
@@ -197,6 +203,7 @@ namespace BetterUdon.Editor
             result.EntryPoints.AddRange(generator.ExportedEntryPoints);
             result.HasSyncedVariables = generator.HasSyncedVariables;
             result.SyncNeedsContinuous = generator.SyncNeedsContinuous;
+            result.SyncModeOverride = generator.SyncModeOverride;
 
             if (result.Diagnostics.Count == 0)
                 result.Assembly = assembly;

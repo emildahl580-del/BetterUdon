@@ -23,6 +23,7 @@ namespace BetterUdon.Editor
             "GetProgramVariable",
             "SetProgramVariable",
             "RequestSerialization",
+            "SendCustomNetworkEvent",
         };
 
         private bool IsCompilerIntrinsic(IMethodSymbol method)
@@ -508,6 +509,18 @@ namespace BetterUdon.Editor
                     _asm.Push(receiver);
                     Extern($"{UdonReceiverType}.__RequestSerialization__SystemVoid", "RequestSerialization");
                     return null;
+
+                case "SendCustomNetworkEvent":
+                {
+                    // SendCustomNetworkEvent(NetworkEventTarget target, string eventName)
+                    const string targetType = "VRCUdonCommonInterfacesNetworkEventTarget";
+
+                    _asm.Push(receiver);
+                    _asm.Push(arguments[0]);
+                    _asm.Push(ConvertTo(arguments[1], _stringType));
+                    Extern($"{UdonReceiverType}.__SendCustomNetworkEvent__{targetType}_SystemString__SystemVoid", "SendCustomNetworkEvent");
+                    return null;
+                }
 
                 case "TakeOwnership":
                 {

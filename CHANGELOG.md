@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0
+
+Closes the remaining UdonSharp API gaps (recursion and multiple behaviours per GameObject are still
+open, see below).
+
+### Added
+
+- `SendCustomNetworkEvent(NetworkEventTarget, string)`, on this behaviour or another one, compiled to
+  Udon's network event extern. Works on any sync mode except `None`.
+- `[BetterUdonBehaviourSyncMode]` with `Any`, `None`, `NoVariableSync`, `Continuous` and `Manual`,
+  including the validation UdonSharp performs (no variables on `None`/`NoVariableSync`, no arrays in
+  continuous, no interpolation in manual, no structs in continuous).
+- `[BetterUdonSynced(OnChange = nameof(Handler))]`: a method or property setter runs after synced
+  values arrive (UdonSharp's `FieldChangeCallback`). The callback runs after struct mirrors are
+  unpacked and before the user's `OnDeserialization`.
+- `nameof(...)` is now a compile-time string everywhere, not only in attributes.
+
+### Fixed
+
+- Heap initial values are declared with the type their symbol already has. Udon's serialiser loses the
+  symbol table for some mismatched combinations (array types, boxed enums next to strings), which
+  previously made a program with a `SendCustomNetworkEvent` constant unreadable.
+
 ## 1.4.0
 
 ### Added

@@ -73,6 +73,12 @@ namespace BetterUdon.Editor
         public bool HasSyncedVariables { get; private set; }
 
         /// <summary>
+        /// Forced sync mode from <c>[BetterUdonBehaviourSyncMode]</c>: 0 Any, 1 None, 2 NoVariableSync,
+        /// 3 Continuous, 4 Manual.
+        /// </summary>
+        public int SyncModeOverride { get; private set; }
+
+        /// <summary>
         /// True when a synced field asks for interpolation, which requires continuous synchronisation
         /// instead of the manual mode that plain synced variables use.
         /// </summary>
@@ -80,6 +86,15 @@ namespace BetterUdon.Editor
 
         private readonly List<IFieldSymbol> _syncedArrayFields = new List<IFieldSymbol>();
         private IFieldSymbol _interpolatedSyncField;
+
+        private sealed class SyncedCallback
+        {
+            public IFieldSymbol Field;
+            public IMethodSymbol Method;
+            public IPropertySymbol Property;
+        }
+
+        private readonly List<SyncedCallback> _syncedCallbacks = new List<SyncedCallback>();
 
         /// <summary>
         /// Structs that were used by the compiled program, used by the inspector to draw struct fields.
@@ -90,6 +105,8 @@ namespace BetterUdon.Editor
         {
             CreateRootSlots();
             CreateFieldSlots();
+            ReadSyncModeOverride();
+            ValidateSyncModeOverride();
 
             List<IMethodSymbol> methods = _behaviourType.GetMembers().OfType<IMethodSymbol>()
                 .Where(m => !m.IsStatic && m.MethodKind == MethodKind.Ordinary && !m.IsImplicitlyDeclared)
@@ -113,11 +130,11 @@ namespace BetterUdon.Editor
                 }
             }
 
-            // Synced structs travel through mirrors that are packed when the client serialises and
-            // unpacked when values arrive, so those entry points always have to exist.
-            if (HasSyncedStructs)
+            // Synced structs travel through mirrors that are packed when the client serialises, and
+            // OnChange callbacks run when values arrive, so those entry points always have to exist.
+            if (HasSyncedStructs || _syncedCallbacks.Count > 0)
             {
-                if (!_exportedEntryPoints.Contains("_onPreSerialization"))
+                if (HasSyncedStructs && !_exportedEntryPoints.Contains("_onPreSerialization"))
                 {
                     _asm.MarkEntryPoint("_onPreSerialization");
                     _exportedEntryPoints.Add("_onPreSerialization");
@@ -130,10 +147,11 @@ namespace BetterUdon.Editor
                     _asm.MarkEntryPoint("_onDeserialization");
                     _exportedEntryPoints.Add("_onDeserialization");
                     EmitUnpackSyncedStructs();
+                    EmitSyncedCallbacks();
                     Halt();
                 }
 
-                if (_interpolatedSyncField != null)
+                if (HasSyncedStructs && _interpolatedSyncField != null)
                 {
                     AddError($"'{_interpolatedSyncField.Name}' asks for interpolation, but this behaviour also " +
                              "synchronises a struct. Structs use manual sync, which cannot interpolate values.",
@@ -154,7 +172,7 @@ namespace BetterUdon.Editor
                 foreach (IFieldSymbol field in _syncedArrayFields)
                 {
                     AddError($"'{field.Name}' is an array, and Udon cannot synchronise arrays with continuous sync. " +
-                             "This behaviour uses continuous sync because another synced field asks for interpolation.",
+                             "Use manual sync for arrays.",
                              field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
                 }
             }
@@ -278,7 +296,73 @@ namespace BetterUdon.Editor
 
                     TryCreateStructMirror(field, slot, syncMode);
                 }
+
+                string onChange = GetChangeCallback(field);
+
+                if (!string.IsNullOrEmpty(onChange))
+                {
+                    if (syncMode == null)
+                        AddError($"'{field.Name}' sets OnChange but is not synced. Add [BetterUdonSynced].", field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                    else
+                        RegisterChangeCallback(field, onChange);
+                }
             }
+        }
+
+        private static string GetChangeCallback(IFieldSymbol field)
+        {
+            AttributeData attribute = field.GetAttributes().FirstOrDefault(a =>
+                a.AttributeClass?.ToDisplayString() == "BetterUdon.BetterUdonSyncedAttribute");
+
+            if (attribute == null)
+                return null;
+
+            foreach (KeyValuePair<string, TypedConstant> argument in attribute.NamedArguments)
+            {
+                if (argument.Key == "OnChange" && argument.Value.Value is string name && !string.IsNullOrEmpty(name))
+                    return name;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Resolves the method or property setter that <c>OnChange</c> names, mirroring UdonSharp's
+        /// <c>FieldChangeCallback</c>.
+        /// </summary>
+        private void RegisterChangeCallback(IFieldSymbol field, string name)
+        {
+            SyntaxNode location = field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+            IPropertySymbol property = _behaviourType.GetMembers(name).OfType<IPropertySymbol>().FirstOrDefault();
+
+            if (property != null)
+            {
+                if (property.Type is null || !SymbolEqualityComparer.Default.Equals(property.Type, field.Type))
+                {
+                    AddError($"The OnChange property '{name}' must have the same type as '{field.Name}'.", location);
+                    return;
+                }
+
+                if (!AccessorHasBody(property.SetMethod))
+                {
+                    AddError($"The OnChange property '{name}' needs a setter body.", location);
+                    return;
+                }
+
+                _syncedCallbacks.Add(new SyncedCallback { Field = field, Property = property });
+                return;
+            }
+
+            IMethodSymbol method = _behaviourType.GetMembers(name).OfType<IMethodSymbol>()
+                .FirstOrDefault(m => m.Parameters.Length == 0 && !m.IsStatic);
+
+            if (method == null)
+            {
+                AddError($"OnChange '{name}' was not found on '{_behaviourType.Name}'. It must be a parameterless method or a property with a setter.", location);
+                return;
+            }
+
+            _syncedCallbacks.Add(new SyncedCallback { Field = field, Method = method });
         }
 
         private static IEnumerable<IFieldSymbol> GetSerializableFields(INamedTypeSymbol type)
@@ -426,6 +510,67 @@ namespace BetterUdon.Editor
             else if (syncMode == "smooth" && !VRC.Udon.UdonNetworkTypes.CanSyncSmooth(type))
             {
                 AddError($"'{field.Name}' cannot use smooth interpolation: '{field.Type.ToDisplayString()}' is not supported.", location);
+            }
+        }
+
+        /// <summary>
+        /// Reads <c>[BetterUdonBehaviourSyncMode]</c> from the behaviour or a base behaviour.
+        /// </summary>
+        private void ReadSyncModeOverride()
+        {
+            for (INamedTypeSymbol current = _behaviourType; current != null; current = current.BaseType)
+            {
+                AttributeData attribute = current.GetAttributes().FirstOrDefault(a =>
+                    a.AttributeClass?.ToDisplayString() == "BetterUdon.BetterUdonBehaviourSyncModeAttribute");
+
+                if (attribute != null && attribute.ConstructorArguments.Length > 0 &&
+                    attribute.ConstructorArguments[0].Value is int value)
+                {
+                    SyncModeOverride = value;
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks that the forced mode is compatible with the synced fields, mirroring UdonSharp's
+        /// validation.
+        /// </summary>
+        private void ValidateSyncModeOverride()
+        {
+            SyntaxNode location = _behaviourType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+
+            switch (SyncModeOverride)
+            {
+                case 1: // None
+                    if (HasSyncedVariables)
+                        AddError("This behaviour is [BetterUdonBehaviourSyncMode(None)], so it cannot have synced variables.", location);
+                    SyncNeedsContinuous = false;
+                    break;
+
+                case 2: // NoVariableSync
+                    if (HasSyncedVariables)
+                        AddError("This behaviour is [BetterUdonBehaviourSyncMode(NoVariableSync)], so it cannot have synced variables.", location);
+                    // Network events still need a sync mode.
+                    SyncNeedsContinuous = true;
+                    break;
+
+                case 3: // Continuous
+                    if (HasSyncedStructs)
+                        AddError("Structs need manual sync; a Continuous behaviour cannot synchronise them.", location);
+                    SyncNeedsContinuous = true;
+                    break;
+
+                case 4: // Manual
+                    if (_interpolatedSyncField != null)
+                    {
+                        AddError($"'{_interpolatedSyncField.Name}' asks for interpolation, which needs Continuous sync. " +
+                                 "Switch the behaviour to Continuous or drop the interpolation mode.",
+                                 _interpolatedSyncField.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax());
+                    }
+
+                    SyncNeedsContinuous = false;
+                    break;
             }
         }
 

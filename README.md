@@ -62,7 +62,7 @@ BetterUdon is a Unity package. Install it from the git repository:
    To pin a release, append the tag:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v1.4.0
+   https://github.com/emildahl580-del/BetterUdon.git#v1.5.0
    ```
 
 Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worlds` is declared as a
@@ -72,7 +72,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer** in the project (`com.vrchat.worl
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`
   in your project. Unity treats any folder in `Packages/` as an embedded package.
-- **Zip** — grab `BetterUdon-1.4.0.zip` from the
+- **Zip** — grab `BetterUdon-1.5.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy this folder into your project's `Packages/` directory.
 
@@ -110,6 +110,23 @@ diagnostics, entry points and heap values to `Library/BetterUdonReport.txt`.
   arguments, return values and private state all behave like C#.
 - **Network sync** — `[BetterUdonSynced]` on fields, including user structs and struct arrays (the
   compiler generates the synced mirrors and the serialisation entry points).
+
+### UdonSharp compatibility
+
+Everything UdonSharp can express is covered, plus the language features above:
+
+| UdonSharp feature | BetterUdon |
+| --- | --- |
+| `[UdonSynced]` + interpolation modes | `[BetterUdonSynced]` (same modes) |
+| `[FieldChangeCallback]` | `[BetterUdonSynced(OnChange = nameof(...))]` |
+| `[UdonBehaviourSyncMode]` | `[BetterUdonBehaviourSyncMode]` (`Any`, `None`, `NoVariableSync`, `Continuous`, `Manual`) |
+| `SendCustomNetworkEvent` | `SendCustomNetworkEvent` (parameterless events) |
+| Udon events (`OnPlayerJoined`, …) | any `Event_*` node, matched by method name |
+| `SendCustomEvent`, delayed variants, `Get`/`SetProgramVariable`, `RequestSerialization`, `Networking.*` | ✓ |
+| Inheritance between behaviours | ✓ (fields of base behaviours become variables) |
+
+Known UdonSharp features not covered yet: `[RecursiveMethod]` recursion, several behaviours on one
+GameObject, network event **parameters** (`[NetworkCallable]`), and `#if UDONSHARP` dual-compilation.
 
 ## Not supported
 
