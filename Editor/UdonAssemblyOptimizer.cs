@@ -791,6 +791,9 @@ namespace BetterUdon.Editor
 
             Dictionary<string, HashSet<string>> interference = BuildInterference(lines, operations, candidates);
 
+            if (interference == null)
+                return;
+
             Dictionary<string, string> groups = CoalesceCopies(operations, candidates, interference, slots);
             Dictionary<string, Slot> colors = ColorGroups(groups, interference, slots);
             Dictionary<string, string> repName = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -868,9 +871,15 @@ namespace BetterUdon.Editor
             Dictionary<string, HashSet<string>> interference =
                 new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
+            // Interference is quadratic in the number of simultaneously live values. A pathological
+            // program should lose the optional slot reuse, not lock up the editor.
+            const long MaxEdges = 1000000;
+            long edgeCount = 0;
+            bool tooComplex = false;
+
             void AddEdge(string a, string b)
             {
-                if (a == null || b == null || a == b)
+                if (tooComplex || a == null || b == null || a == b)
                     return;
 
                 if (!candidates.Contains(a) || !candidates.Contains(b))
@@ -882,7 +891,10 @@ namespace BetterUdon.Editor
                     interference[a] = set;
                 }
 
-                set.Add(b);
+                if (!set.Add(b))
+                    return;
+
+                edgeCount++;
 
                 if (!interference.TryGetValue(b, out HashSet<string> reverse))
                 {
@@ -891,10 +903,16 @@ namespace BetterUdon.Editor
                 }
 
                 reverse.Add(a);
+
+                if (edgeCount > MaxEdges)
+                    tooComplex = true;
             }
 
             foreach (Block block in blocks)
             {
+                if (tooComplex)
+                    break;
+
                 HashSet<string> live = new HashSet<string>(block.LiveOut, StringComparer.Ordinal);
 
                 for (int i = block.Operations.Count - 1; i >= 0; i--)
@@ -949,6 +967,9 @@ namespace BetterUdon.Editor
                         live.Add(use);
                 }
             }
+
+            if (tooComplex)
+                return null;
 
             return interference;
         }
