@@ -209,6 +209,7 @@ namespace BetterUdon.Editor
             foreach (KeyValuePair<ISymbol, Slot> pair in _fieldSlots)
                 RegisterStructLayouts(pair.Key is IFieldSymbol field ? field.Type : null);
 
+            UnoptimizedSlotCount = _asm.Slots.Count;
             _asm.Optimize(_optimizationFlags);
 
             if (_asm.Slots.Count > BetterUdonComplexity.SlotBudget)
@@ -259,6 +260,9 @@ namespace BetterUdon.Editor
         public IReadOnlyList<Slot> Slots => _asm.Slots;
 
         public int SlotCount => _asm.Slots.Count;
+
+        /// <summary>Heap slots generated before the optimizer ran.</summary>
+        public int UnoptimizedSlotCount { get; private set; }
 
         public int GenericInstantiationCount => _genericInstantiations.Count;
 

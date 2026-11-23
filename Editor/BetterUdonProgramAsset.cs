@@ -44,6 +44,9 @@ namespace BetterUdon.Editor
         private int lastSlotCount;
 
         [SerializeField, HideInInspector]
+        private int lastUnoptimizedSlotCount;
+
+        [SerializeField, HideInInspector]
         private int lastGenericInstantiationCount;
 
         // 0 Any, 1 None, 2 NoVariableSync, 3 Continuous, 4 Manual (BetterUdonBehaviourSyncMode).
@@ -87,6 +90,10 @@ namespace BetterUdon.Editor
         public string ClassName => className;
 
         public int SlotCount => lastSlotCount > 0 ? lastSlotCount : ProgramSymbolCount;
+
+        /// <summary>Heap slots the lowering produced before the optimizer ran.</summary>
+        public int UnoptimizedSlotCount =>
+            lastUnoptimizedSlotCount > 0 ? lastUnoptimizedSlotCount : SlotCount;
 
         public int GenericInstantiationCount => lastGenericInstantiationCount;
 
@@ -190,6 +197,7 @@ namespace BetterUdon.Editor
             if (result.Success)
             {
                 lastSlotCount = result.SlotCount;
+                lastUnoptimizedSlotCount = result.UnoptimizedSlotCount;
                 lastGenericInstantiationCount = result.GenericInstantiationCount;
             }
 

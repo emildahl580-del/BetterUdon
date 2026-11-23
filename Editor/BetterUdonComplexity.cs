@@ -71,6 +71,16 @@ namespace BetterUdon.Editor
                 $"{generics:N0} / {GenericBudget:N0} generic instantiations",
                 EditorStyles.miniLabel);
 
+            int unoptimizedSlots = asset.UnoptimizedSlotCount;
+
+            if (unoptimizedSlots > slots && slots > 0)
+            {
+                int reduction = Mathf.RoundToInt((1f - slots / (float)unoptimizedSlots) * 100f);
+                EditorGUILayout.LabelField(
+                    $"Heap slots: {unoptimizedSlots:N0} → {slots:N0} after optimization ({reduction}% fewer)",
+                    EditorStyles.miniBoldLabel);
+            }
+
             if (ratio >= 1f)
             {
                 EditorGUILayout.HelpBox(

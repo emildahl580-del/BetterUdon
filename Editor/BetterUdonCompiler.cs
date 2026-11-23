@@ -39,6 +39,7 @@ namespace BetterUdon.Editor
         public List<BetterUdonStructTypeInfo> StructTypes = new List<BetterUdonStructTypeInfo>();
         public uint HeapSize;
         public int SlotCount;
+        public int UnoptimizedSlotCount;
         public int GenericInstantiationCount;
 
         /// <summary>Metadata for <c>[NetworkCallable]</c> entry points, stored with the program.</summary>
@@ -217,6 +218,7 @@ namespace BetterUdon.Editor
             result.HeapInitialValues = generator.ComputeHeapInitialValues();
             result.HeapSize = generator.HeapSize;
             result.SlotCount = generator.SlotCount;
+            result.UnoptimizedSlotCount = generator.UnoptimizedSlotCount;
             result.GenericInstantiationCount = generator.GenericInstantiationCount;
             result.EntryPoints.AddRange(generator.ExportedEntryPoints);
             result.HasSyncedVariables = generator.HasSyncedVariables;
