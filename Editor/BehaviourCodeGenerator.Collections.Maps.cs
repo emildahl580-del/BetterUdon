@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -548,7 +547,7 @@ namespace BetterUdon.Editor
             {
                 case "Contains":
                 {
-                    Slot value = ConvertTo(EmitExpression(invocation.ArgumentList.Arguments[0].Expression), elementType);
+                    Slot value = ConvertTo(EmitCollectionArgument(invocation.ArgumentList.Arguments[0].Expression, elementType), elementType);
                     result = NewSlot(_boolType, "collectionContains");
 
                     if (keys)
@@ -719,7 +718,7 @@ namespace BetterUdon.Editor
 
             if (method.Name == "TryGetValue" && invocation.ArgumentList.Arguments.Count == 2)
             {
-                Slot key = ConvertTo(EmitExpression(invocation.ArgumentList.Arguments[0].Expression), keyType);
+                Slot key = ConvertTo(EmitCollectionArgument(invocation.ArgumentList.Arguments[0].Expression, keyType), keyType);
                 LValue valueTarget = EmitOutArgument(invocation.ArgumentList.Arguments[1].Expression);
 
                 if (valueTarget == null)
@@ -752,9 +751,7 @@ namespace BetterUdon.Editor
                 return true;
             }
 
-            List<Slot> arguments = invocation.ArgumentList.Arguments
-                .Select(argument => EmitExpression(argument.Expression))
-                .ToList();
+            List<Slot> arguments = EmitCollectionArguments(invocation, method);
 
             switch (method.Name)
             {

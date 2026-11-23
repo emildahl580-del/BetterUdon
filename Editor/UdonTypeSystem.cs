@@ -172,11 +172,16 @@ namespace BetterUdon.Editor
 
             if (type is IArrayTypeSymbol arrayType)
             {
-                if (arrayType.ElementType is IArrayTypeSymbol || IsUserStruct(arrayType.ElementType))
+                if (arrayType.ElementType is IArrayTypeSymbol ||
+                    IsUserStruct(arrayType.ElementType) ||
+                    arrayType.ElementType.TypeKind == TypeKind.Delegate)
                     return "SystemObjectArray";
 
                 return GetUdonTypeName(arrayType.ElementType) + "Array";
             }
+
+            if (type.TypeKind == TypeKind.Delegate)
+                return "SystemObject";
 
             if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType)
             {
@@ -238,7 +243,9 @@ namespace BetterUdon.Editor
 
             if (type is IArrayTypeSymbol array)
             {
-                if (array.ElementType is IArrayTypeSymbol || IsUserStruct(array.ElementType))
+                if (array.ElementType is IArrayTypeSymbol ||
+                    IsUserStruct(array.ElementType) ||
+                    array.ElementType.TypeKind == TypeKind.Delegate)
                     return "SystemObjectArray";
             }
 

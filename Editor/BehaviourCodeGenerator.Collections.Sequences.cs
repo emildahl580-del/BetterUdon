@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -67,9 +66,7 @@ namespace BetterUdon.Editor
             if (set == null)
                 return false;
 
-            List<Slot> arguments = invocation.ArgumentList.Arguments
-                .Select(argument => EmitExpression(argument.Expression))
-                .ToList();
+            List<Slot> arguments = EmitCollectionArguments(invocation, method);
 
             switch (method.Name)
             {
@@ -183,9 +180,7 @@ namespace BetterUdon.Editor
             if (collection == null)
                 return false;
 
-            List<Slot> arguments = invocation.ArgumentList.Arguments
-                .Select(argument => EmitExpression(argument.Expression))
-                .ToList();
+            List<Slot> arguments = EmitCollectionArguments(invocation, method);
 
             switch (method.Name)
             {

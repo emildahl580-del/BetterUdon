@@ -466,6 +466,14 @@ namespace BetterUdon.Editor
             if (IsListType(field.Type, out _))
                 return false;
 
+            // Delegates are runtime callable state, not a serialisable Udon public variable.
+            if (field.Type.TypeKind == TypeKind.Delegate)
+                return false;
+
+            if (field.Type is IArrayTypeSymbol delegateArray &&
+                delegateArray.ElementType.TypeKind == TypeKind.Delegate)
+                return false;
+
             if (field.DeclaredAccessibility != Accessibility.Public &&
                 !HasAttribute(field, "UnityEngine.SerializeField"))
             {

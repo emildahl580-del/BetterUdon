@@ -24,7 +24,9 @@ namespace BetterUdon.Editor
                 if (systemType != null && typeof(UnityEngine.Object).IsAssignableFrom(systemType))
                     return "SystemObjectArray";
 
-                if (elementType is IArrayTypeSymbol || UdonTypeSystem.IsUserStruct(elementType))
+                if (elementType is IArrayTypeSymbol ||
+                    UdonTypeSystem.IsUserStruct(elementType) ||
+                    elementType.TypeKind == TypeKind.Delegate)
                     return "SystemObjectArray";
             }
 
@@ -41,7 +43,9 @@ namespace BetterUdon.Editor
                 if (systemType != null && typeof(UnityEngine.Object).IsAssignableFrom(systemType))
                     return "SystemObject";
 
-                if (elementType is IArrayTypeSymbol || UdonTypeSystem.IsUserStruct(elementType))
+                if (elementType is IArrayTypeSymbol ||
+                    UdonTypeSystem.IsUserStruct(elementType) ||
+                    elementType.TypeKind == TypeKind.Delegate)
                     return "SystemObject";
             }
 

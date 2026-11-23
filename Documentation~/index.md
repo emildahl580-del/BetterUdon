@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 2.2.0**
+**Version 2.3.0**
 
 BetterUdon compiles C# into ordinary Udon assembly for VRChat worlds. It uses VRChat's assembler and
 runs on the stock Udon VM. There is no BetterUdon runtime, no custom interpreter and no hidden scene
@@ -359,6 +359,30 @@ properties cannot be written in source even though the underlying representation
 The important cost is not the representation but the generated code. Every list operation is inlined;
 a loop that calls `Add` per element expands code, and `foreach` over a dictionary is linear. The
 inspector complexity bar exists to make that growth visible.
+
+### 5.6 Delegates in collections
+
+Delegate element types are stored as `SystemObject` values, so a collection of delegates is an
+`object[]` of the compiler's delegate invocation arrays. `List<Action>`, `Dictionary<string, Action>`,
+`Queue<Action>`, `Stack<Action>`, `HashSet<Action>` and `Action[]` all accept method groups, lambdas
+and existing delegate variables:
+
+```csharp
+List<Action> callbacks = new List<Action>();
+callbacks.Add(OnOpen);
+callbacks.Add(() => count++);
+callbacks[0]();
+
+Dictionary<string, Action> map = new Dictionary<string, Action>();
+map["open"] = OnOpen;
+map["open"] += OnClose;
+```
+
+Indexer reads and writes, `Add`, `Insert`, `Remove`, `Contains`, `AddRange`, `ToArray`, `foreach`,
+`Enqueue`/`Dequeue`, `Push`/`Pop` and `TryGetValue` all use the same delegate lowering. Delegate
+equality compares the invocation entries (method ID, target and closure reference), which makes
+`Contains`, `Remove`, `HashSet` membership and delegate dictionary keys match C#. Delegates are runtime
+state, not inspector-serialisable; create and populate the collection in `Start`.
 
 ---
 

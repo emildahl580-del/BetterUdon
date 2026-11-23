@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.3.0
+
+### Added
+
+- Delegate values in collections. `List<T>`, `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `HashSet<T>` and
+  arrays now accept delegate element types. Method groups and lambdas can be passed directly to
+  `Add`, `Insert`, indexer assignment, `Enqueue`, `Push`, `HashSet.Add`, `Dictionary.Add` and
+  `TryGetValue`.
+- Delegate indexer reads and invocations work through collections: `callbacks[0]()`,
+  `map["open"]()`, `foreach (var pair in map) pair.Value()` and `Queue<Action>.Dequeue()()`.
+- `+=` and `-=` work on delegate collection elements and dictionary entries.
+- Delegate equality compares the invocation list (method ID, target and closure reference), so
+  `Contains`, `Remove`, `IndexOf`, `HashSet` membership and delegate dictionary keys match C#.
+- Delegate arrays use `SystemObjectArray`/`SystemObject`, so `Action[]`, `ToArray`, `AddRange` and
+  collection growth work correctly.
+- Delegate fields and delegate arrays are excluded from inspector public variables; they are runtime
+  callable state, not serialisable Udon values.
+
+### Fixed
+
+- Delegate invocations on properties, fields and dictionary `KeyValuePair.Value` now use the delegate
+  expression itself rather than its receiver.
+- Delegate initializers from method invocations (`Action a = GetAction();`) no longer mistake the
+  invoked method for a method group.
+- Delegate assignment and `+=`/`-=` on list, dictionary and array elements now write back through the
+  lvalue instead of a temporary read.
+
 ## 2.2.0
 
 ### Added

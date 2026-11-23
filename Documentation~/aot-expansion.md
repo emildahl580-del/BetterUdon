@@ -132,6 +132,15 @@ Reassess what pure AOT can still cover once the above land:
 - [—] `Instantiate` overloads with parent / position / rotation. Instantiate first, then set the
       transform; add the overloads when the transform composition is worth the extra slots.
 
+## 9. Delegate collections
+
+- [x] Delegate element types in `List<T>`, `Dictionary<K,V>`, `Queue<T>`, `Stack<T>`, `HashSet<T>`
+      and arrays, stored as `SystemObject` invocation arrays.
+- [x] Method groups and lambdas as collection arguments, indexer assignments and `+=`/`-=`.
+- [x] Invocation from indexers, `KeyValuePair.Value`, `Dequeue`/`Pop`/`Peek` and transformed arrays.
+- [x] Delegate equality for `Contains`, `Remove`, `IndexOf`, `HashSet` and dictionary keys.
+- [x] Exclude delegate fields and delegate arrays from inspector public variables.
+
 ## Rules
 
 - Stock Udon only: no custom runtime, no native code, no Unity Jobs, no compute shaders.

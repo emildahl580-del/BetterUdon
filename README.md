@@ -150,10 +150,10 @@ BetterUdon is a Unity package. `main` is the 2.x line; use a pinned tag if you w
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   Pinned 2.2 release:
+   Pinned 2.3 release:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v2.2.0
+   https://github.com/emildahl580-del/BetterUdon.git#v2.3.0
    ```
 
    Development branch:
@@ -168,7 +168,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer**. The package declares `com.vrcha
 ### Other installs
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`.
-- **Zip** — take `BetterUdon-2.2.0.zip` from the
+- **Zip** — take `BetterUdon-2.3.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy the package folder into your project's `Packages/` directory.
 
@@ -269,6 +269,27 @@ traded for predictability and zero extra runtime code.
 
 `Dictionary.Keys` and `Dictionary.Values` are stored collection values supporting `Count`,
 `Contains`, `ToArray`, `CopyTo` and `foreach`.
+
+Delegates are valid collection values. `List<Action>`, `Dictionary<string, Action>`, `Queue<Action>`,
+`Stack<Action>` and `HashSet<Action>` work with method groups and lambdas directly:
+
+```csharp
+List<Action> callbacks = new List<Action>();
+callbacks.Add(OnOpen);
+callbacks.Add(() => count++);
+callbacks[0]();
+
+Dictionary<string, Action> map = new Dictionary<string, Action>();
+map["open"] = OnOpen;
+map["open"]();
+
+Action[] array = callbacks.ToArray();
+```
+
+Delegate equality compares the invocation list (method, target and closure), so `Contains`, `Remove`,
+`HashSet` membership and delegate dictionary keys behave like C#. Delegates are stored as the same
+compiler invocation arrays used for delegate locals and fields; they are not inspector-serialisable, so
+create and populate collections in `Start`.
 
 ### Generics
 

@@ -63,6 +63,10 @@ namespace BetterUdon.Editor
             if (!TryGetDelegateInvoke(targetType, out IMethodSymbol invoke))
                 return false;
 
+            // An invocation returns a value; it is not a method group delegate target.
+            if (expression is InvocationExpressionSyntax)
+                return false;
+
             ISymbol symbol = GetSymbolInfo(expression).Symbol;
             IMethodSymbol lambda = symbol as IMethodSymbol;
 
@@ -84,6 +88,9 @@ namespace BetterUdon.Editor
             if (target == null || !TryGetDelegateInvoke(target.Type, out IMethodSymbol invoke))
                 return false;
 
+            if (value is InvocationExpressionSyntax)
+                return false;
+
             if (value.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
                 !(GetSymbolInfo(value).Symbol is IMethodSymbol))
                 return false;
@@ -91,14 +98,17 @@ namespace BetterUdon.Editor
             if (!TryGetDelegateMethod(value, invoke, node, out IMethodSymbol method, out Slot targetSlot))
                 return true;
 
-            Copy(CreateDelegateArray(CreateDelegateEntry(targetSlot, GetDelegateMethodId(method),
-                CreateLambdaClosure(method, node))), target.Get(false));
+            target.Set(CreateDelegateArray(CreateDelegateEntry(targetSlot, GetDelegateMethodId(method),
+                CreateLambdaClosure(method, node))));
             return true;
         }
 
         private bool TryEmitDelegateLocalInitializer(Slot slot, ITypeSymbol type, ExpressionSyntax value, SyntaxNode node)
         {
             if (!TryGetDelegateInvoke(type, out IMethodSymbol invoke))
+                return false;
+
+            if (value is InvocationExpressionSyntax)
                 return false;
 
             if (value.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
@@ -333,6 +343,9 @@ namespace BetterUdon.Editor
             if (target == null || !TryGetDelegateInvoke(target.Type, out IMethodSymbol invoke))
                 return false;
 
+            if (value is InvocationExpressionSyntax)
+                return false;
+
             if (value.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.NullLiteralExpression) ||
                 !(GetSymbolInfo(value).Symbol is IMethodSymbol))
                 return false;
@@ -351,14 +364,14 @@ namespace BetterUdon.Editor
             _asm.JumpIfFalse(isNull, notNullLabel);
 
             if (add)
-                Copy(CreateDelegateArray(entry), target.Get(false));
+                target.Set(CreateDelegateArray(entry));
 
             _asm.Jump(endLabel);
             _asm.MarkLabel(notNullLabel);
 
             if (add)
             {
-                Copy(CopyDelegateArray(current, entry), target.Get(false));
+                target.Set(CopyDelegateArray(current, entry));
             }
             else
             {
@@ -380,7 +393,7 @@ namespace BetterUdon.Editor
                     _boolType, node);
                 string notEmptyLabel = NewLabel("delegateRemoveNotEmpty");
                 _asm.JumpIfFalse(isEmpty, notEmptyLabel);
-                Copy(ConstantSlot(_objectType, null), target.Get(false));
+                target.Set(ConstantSlot(_objectType, null));
                 _asm.Jump(endLabel);
                 _asm.MarkLabel(notEmptyLabel);
 
@@ -413,7 +426,7 @@ namespace BetterUdon.Editor
                 _asm.MarkLabel(nextLabel);
                 _asm.Jump(loopLabel);
                 _asm.MarkLabel(loopEnd);
-                Copy(copy, target.Get(false));
+                target.Set(copy);
             }
 
             _asm.MarkLabel(endLabel);
@@ -460,6 +473,82 @@ namespace BetterUdon.Editor
             return result;
         }
 
+        private Slot EmitDelegateEquality(Slot left, Slot right, SyntaxNode node)
+        {
+            Slot result = NewSlot(_boolType, "delegateEqual");
+            Copy(ConstantSlot(_boolType, false), result);
+
+            string endLabel = NewLabel("delegateEqEnd");
+            string leftNotNull = NewLabel("delegateEqLeftNotNull");
+            string bothNotNull = NewLabel("delegateEqBothNotNull");
+            string loopLabel = NewLabel("delegateEqLoop");
+            string matchedLabel = NewLabel("delegateEqMatched");
+
+            Slot leftNull = EmitBinaryOperator(left, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(leftNull, leftNotNull);
+
+            Slot rightNull = EmitBinaryOperator(right, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            Copy(rightNull, result);
+            _asm.Jump(endLabel);
+
+            _asm.MarkLabel(leftNotNull);
+            Slot rightMissing = EmitBinaryOperator(right, ConstantSlot(_objectType, null), _objectType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(rightMissing, bothNotNull);
+            _asm.Jump(endLabel);
+
+            _asm.MarkLabel(bothNotNull);
+            Slot leftLength = ArrayLength(left);
+            Slot rightLength = ArrayLength(right);
+            Slot sameLength = EmitBinaryOperator(leftLength, rightLength, _intType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(sameLength, endLabel);
+
+            Slot index = NewSlot(_intType, "delegateEqIndex");
+            Copy(IntConstant(0), index);
+
+            _asm.MarkLabel(loopLabel);
+            Slot inRange = EmitBinaryOperator(index, leftLength, _intType, "op_LessThan", _boolType, node);
+            _asm.JumpIfFalse(inRange, matchedLabel);
+
+            Slot leftEntry = new ArrayElementLValue(this, left, index, _objectArrayType, _objectType).Get(false);
+            Slot rightEntry = new ArrayElementLValue(this, right, index, _objectArrayType, _objectType).Get(false);
+
+            Slot leftId = NewSlot(_intType, "delegateEqLeftId");
+            PushObjectArrayIndex(leftEntry, 1, leftId);
+            Slot rightId = NewSlot(_intType, "delegateEqRightId");
+            PushObjectArrayIndex(rightEntry, 1, rightId);
+            Slot idsEqual = EmitBinaryOperator(leftId, rightId, _intType, "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(idsEqual, endLabel);
+
+            Slot leftTarget = NewSlot(_objectType, "delegateEqLeftTarget");
+            PushObjectArrayIndex(leftEntry, 0, leftTarget);
+            Slot rightTarget = NewSlot(_objectType, "delegateEqRightTarget");
+            PushObjectArrayIndex(rightEntry, 0, rightTarget);
+            Slot targetsEqual = EmitBinaryOperator(leftTarget, rightTarget, _objectType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(targetsEqual, endLabel);
+
+            Slot leftClosure = NewSlot(_objectType, "delegateEqLeftClosure");
+            PushObjectArrayIndex(leftEntry, 2, leftClosure);
+            Slot rightClosure = NewSlot(_objectType, "delegateEqRightClosure");
+            PushObjectArrayIndex(rightEntry, 2, rightClosure);
+            Slot closuresEqual = EmitBinaryOperator(leftClosure, rightClosure, _objectType,
+                "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(closuresEqual, endLabel);
+
+            Copy(EmitBinaryOperator(index, IntConstant(1), _intType, "op_Addition", _intType, node), index);
+            _asm.Jump(loopLabel);
+
+            _asm.MarkLabel(matchedLabel);
+            Copy(ConstantSlot(_boolType, true), result);
+
+            _asm.MarkLabel(endLabel);
+            return result;
+        }
+
         private Slot EmitDelegateInvocation(IMethodSymbol invoke, InvocationExpressionSyntax invocation)
         {
             if (!TryGetDelegateInvoke(invoke.ContainingType, out IMethodSymbol signature))
@@ -475,9 +564,9 @@ namespace BetterUdon.Editor
                 return null;
             }
 
-            ExpressionSyntax receiverSyntax = invocation.Expression is MemberAccessExpressionSyntax memberAccess
-                ? memberAccess.Expression
-                : invocation.Expression;
+            // The invoked expression itself is the delegate value. For `pair.Value()` or
+            // `other.Callback()` that is the whole member access, not its receiver.
+            ExpressionSyntax receiverSyntax = invocation.Expression;
 
             Slot ids = EmitExpression(receiverSyntax);
             if (ids == null)

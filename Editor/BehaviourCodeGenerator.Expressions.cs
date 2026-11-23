@@ -450,13 +450,13 @@ namespace BetterUdon.Editor
             if (UdonTypeSystem.IsUserStruct(leftType) && IsUserDefinedMethod(operatorMethod))
                 return InlineMethod(operatorMethod, MaybeCloneStruct(left), new List<Slot> { right }, binary);
 
-            // Delegates are ordinary heap references. Their C# == / != operators must compare the
-            // reference, not call a nonexistent SystemAction/SystemFunc operator extern.
+            // Delegates are invocation arrays. C# compares their method, target and closure entries,
+            // not just the heap reference, so list/dictionary membership behaves like C#.
             if ((kind == SyntaxKind.EqualsExpression || kind == SyntaxKind.NotEqualsExpression) &&
                 (leftType?.TypeKind == TypeKind.Delegate || GetType(binary.Right)?.TypeKind == TypeKind.Delegate))
             {
-                string comparison = kind == SyntaxKind.EqualsExpression ? "op_Equality" : "op_Inequality";
-                return EmitBinaryOperator(left, right, _objectType, comparison, _boolType, binary);
+                Slot equal = EmitDelegateEquality(left, right, binary);
+                return kind == SyntaxKind.EqualsExpression ? equal : EmitLogicalNot(equal);
             }
 
             string signature = UdonExternSignatures.BuiltinOperator(

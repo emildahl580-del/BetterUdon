@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -46,6 +45,39 @@ namespace BetterUdon.Editor
         private bool TryGetListElementType(ITypeSymbol type, out ITypeSymbol elementType)
         {
             return IsListType(type, out elementType);
+        }
+
+        /// <summary>
+        /// Emits collection arguments, lowering lambdas and method groups when the parameter type is a
+        /// delegate. This is what lets <c>List&lt;Action&gt;.Add(Foo)</c> and
+        /// <c>Dictionary&lt;string, Action&gt;["x"] = Foo</c> behave like C#.
+        /// </summary>
+        private List<Slot> EmitCollectionArguments(InvocationExpressionSyntax invocation, IMethodSymbol method)
+        {
+            List<Slot> arguments = new List<Slot>(invocation.ArgumentList.Arguments.Count);
+
+            for (int i = 0; i < invocation.ArgumentList.Arguments.Count; i++)
+            {
+                ExpressionSyntax expression = invocation.ArgumentList.Arguments[i].Expression;
+                ITypeSymbol parameterType = i < method.Parameters.Length
+                    ? Substitute(method.Parameters[i].Type)
+                    : null;
+
+                arguments.Add(EmitCollectionArgument(expression, parameterType));
+            }
+
+            return arguments;
+        }
+
+        private Slot EmitCollectionArgument(ExpressionSyntax expression, ITypeSymbol targetType)
+        {
+            if (targetType != null &&
+                TryEmitDelegateValue(expression, targetType, expression, out Slot delegateValue))
+            {
+                return delegateValue;
+            }
+
+            return EmitExpression(expression);
         }
 
         #endregion
@@ -220,6 +252,9 @@ namespace BetterUdon.Editor
 
         private Slot EmitValueEquality(Slot left, Slot right, ITypeSymbol type, SyntaxNode node)
         {
+            if (type != null && type.TypeKind == TypeKind.Delegate)
+                return EmitDelegateEquality(left, right, node);
+
             if (UdonTypeSystem.IsUserStruct(type))
                 return EmitStructEquality(left, right, type, false, node);
 
@@ -287,9 +322,7 @@ namespace BetterUdon.Editor
             if (list == null)
                 return false;
 
-            List<Slot> arguments = invocation.ArgumentList.Arguments
-                .Select(argument => EmitExpression(argument.Expression))
-                .ToList();
+            List<Slot> arguments = EmitCollectionArguments(invocation, method);
 
             switch (method.Name)
             {
