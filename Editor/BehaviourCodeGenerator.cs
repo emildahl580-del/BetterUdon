@@ -455,8 +455,11 @@ namespace BetterUdon.Editor
             if (IsListType(field.Type, out _))
                 return false;
 
-            if (field.DeclaredAccessibility != Accessibility.Public)
+            if (field.DeclaredAccessibility != Accessibility.Public &&
+                !HasAttribute(field, "UnityEngine.SerializeField"))
+            {
                 return false;
+            }
 
             if (HasAttribute(field, "UnityEngine.HideInInspector"))
                 return false;
@@ -495,8 +498,9 @@ namespace BetterUdon.Editor
 
             if (!IsExported(field))
             {
-                AddError($"'{field.Name}' is marked [BetterUdonSynced] but is not a public variable. " +
-                         "Synced fields must be public and must not be hidden, auto properties or List<T>.", location);
+                AddError($"'{field.Name}' is marked [BetterUdonSynced] but is not an exported inspector field. " +
+                         "Synced fields must be public or [SerializeField], and must not be hidden, auto " +
+                         "properties or List<T>.", location);
                 return;
             }
 

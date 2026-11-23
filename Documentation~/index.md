@@ -762,6 +762,16 @@ It fills from green through yellow/orange to red as the worst ratio grows. Over-
 receive a compile-time diagnostic. These are BetterUdon guardrails: Udon uses 32-bit heap/program
 addresses and does not impose the same counts.
 
+Public fields and private `[SerializeField]` fields are both exported as Udon public variables, so a
+private inspector reference such as
+
+```csharp
+[SerializeField] private Door target;
+```
+
+works exactly like a public field. `[HideInInspector]`, `[BetterUdonNoExport]`, auto-property backings
+and `List<T>` fields are not exported.
+
 `Tools > BetterUdon > Run Diagnostics` compiles every behaviour and writes the assembly, diagnostics,
 entry points and heap values to `Library/BetterUdonReport.txt`.
 

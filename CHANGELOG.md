@@ -43,6 +43,8 @@
   integers to a `SystemSingle` extern.
 - Parenthesized, expression-bodied and simple lambdas are accepted as delegate arguments to user
   constructors and methods, in addition to assignments and local initializers.
+- Private `[SerializeField]` fields are exported as Udon public variables, so inspector-assigned
+  references and values work without changing the C# field to `public`.
 
 ## 1.6.1
 

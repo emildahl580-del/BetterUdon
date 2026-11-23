@@ -23,6 +23,9 @@ iterators, and no synchronous cross-behaviour calls. BetterUdon compiles a much 
 - **C# call semantics**: `ref`, `out`, `in`, `out var`, named and optional arguments, `params`, local
   functions with captures, and implicit numeric conversions such as passing `int` where a `float` is
   expected.
+- **Unity-style fields**: public fields and private `[SerializeField]` fields both appear in the normal
+  inspector and become Udon public variables; you do not need to make a reference public just to use it
+  from the program.
 - **Properties**: auto properties, private setters, expression-bodied properties and properties with
   explicit getter/setter bodies.
 - **Delegates and events**: `Action`, `Action<T>`, `Func<..., TResult>`, method groups, capturing
