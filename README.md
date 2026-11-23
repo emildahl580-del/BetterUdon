@@ -150,10 +150,10 @@ BetterUdon is a Unity package. `main` is the 2.0 line; use a pinned tag if you w
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   Pinned 2.0 alpha:
+   Pinned 2.0 release:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0-alpha.1
+   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0
    ```
 
    Development branch:
@@ -168,7 +168,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer**. The package declares `com.vrcha
 ### Other installs
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`.
-- **Zip** — take `BetterUdon-2.0.0-alpha.1.zip` from the
+- **Zip** — take `BetterUdon-2.0.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy the package folder into your project's `Packages/` directory.
 

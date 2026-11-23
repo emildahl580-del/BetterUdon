@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 2.0.0-alpha.1**
+**Version 2.0.0**
 
 BetterUdon compiles C# into ordinary Udon assembly for VRChat worlds. It uses VRChat's assembler and
 runs on the stock Udon VM. There is no BetterUdon runtime, no custom interpreter and no hidden scene

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0-alpha.1
+## 2.0.0
 
 ### Added
 
@@ -45,6 +45,9 @@
   constructors and methods, in addition to assignments and local initializers.
 - Private `[SerializeField]` fields are exported as Udon public variables, so inspector-assigned
   references and values work without changing the C# field to `public`.
+- Delegate `==` / `!=` compares heap references, so `if (callback != null)` and `action == null` work.
+- `-=` removes a delegate subscriber only when both the method ID and target behaviour match.
+- Lambdas are accepted in object and array initializers, not only constructor and method arguments.
 
 ## 1.6.1
 
