@@ -363,7 +363,7 @@ namespace BetterUdon.Editor
             else
             {
                 Slot length = ArrayLength(current);
-                Slot index = EmitDelegateFindEntry(current, id, node);
+                Slot index = EmitDelegateFindEntry(current, id, targetSlot, node);
                 string missingLabel = NewLabel("delegateRemoveMissing");
                 string foundLabel = NewLabel("delegateRemoveFound");
                 Slot found = EmitBinaryOperator(index, IntConstant(0), _intType, "op_GreaterThanOrEqual",
@@ -420,7 +420,7 @@ namespace BetterUdon.Editor
             return true;
         }
 
-        private Slot EmitDelegateFindEntry(Slot array, int methodId, SyntaxNode node)
+        private Slot EmitDelegateFindEntry(Slot array, int methodId, Slot target, SyntaxNode node)
         {
             Slot result = NewSlot(_intType, "findId");
             Copy(IntConstant(-1), result);
@@ -443,6 +443,13 @@ namespace BetterUdon.Editor
             Slot equal = EmitBinaryOperator(id, IntConstant(methodId), _intType,
                 "op_Equality", _boolType, node);
             _asm.JumpIfFalse(equal, nextLabel);
+
+            Slot entryTarget = NewSlot(_objectType, "entryTarget");
+            PushObjectArrayIndex(entry, 0, entryTarget);
+            Slot targetEqual = EmitBinaryOperator(entryTarget,
+                target ?? ConstantSlot(_objectType, null), _objectType, "op_Equality", _boolType, node);
+            _asm.JumpIfFalse(targetEqual, nextLabel);
+
             Copy(index, result);
             _asm.Jump(endLabel);
 

@@ -906,7 +906,10 @@ namespace BetterUdon.Editor
                 if (index < 0)
                     continue;
 
-                Slot value = EmitExpression(assignment.Right);
+                Slot value;
+                if (!TryEmitDelegateValue(assignment.Right, field.Type, assignment, out value))
+                    value = EmitExpression(assignment.Right);
+
                 StoreStructField(target, index, ConvertTo(value, field.Type));
             }
         }
@@ -931,7 +934,10 @@ namespace BetterUdon.Editor
                 for (int i = 0; i < size; i++)
                 {
                     ArrayElementLValue element = new ArrayElementLValue(this, arraySlot, IntConstant(i), arrayType, arraySymbol.ElementType);
-                    element.Set(EmitExpression(initializer.Expressions[i]));
+                    Slot value;
+                    if (!TryEmitDelegateValue(initializer.Expressions[i], arraySymbol.ElementType, initializer.Expressions[i], out value))
+                        value = EmitExpression(initializer.Expressions[i]);
+                    element.Set(value);
                 }
 
                 return arraySlot;

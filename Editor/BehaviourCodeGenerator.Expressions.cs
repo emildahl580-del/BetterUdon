@@ -432,12 +432,32 @@ namespace BetterUdon.Editor
 
             if (operatorMethod == null)
             {
+                ITypeSymbol leftReference = GetType(binary.Left);
+                ITypeSymbol rightReference = GetType(binary.Right);
+
+                if ((kind == SyntaxKind.EqualsExpression || kind == SyntaxKind.NotEqualsExpression) &&
+                    (IsReferenceType(leftReference) || leftReference?.TypeKind == TypeKind.Delegate ||
+                     IsReferenceType(rightReference) || rightReference?.TypeKind == TypeKind.Delegate))
+                {
+                    string comparison = kind == SyntaxKind.EqualsExpression ? "op_Equality" : "op_Inequality";
+                    return EmitBinaryOperator(left, right, _objectType, comparison, _boolType, binary);
+                }
+
                 AddError($"Unable to resolve the operator '{binary.OperatorToken.ValueText}'.", binary);
                 return NewSlot(GetType(binary) ?? _objectType, "bad");
             }
 
             if (UdonTypeSystem.IsUserStruct(leftType) && IsUserDefinedMethod(operatorMethod))
                 return InlineMethod(operatorMethod, MaybeCloneStruct(left), new List<Slot> { right }, binary);
+
+            // Delegates are ordinary heap references. Their C# == / != operators must compare the
+            // reference, not call a nonexistent SystemAction/SystemFunc operator extern.
+            if ((kind == SyntaxKind.EqualsExpression || kind == SyntaxKind.NotEqualsExpression) &&
+                (leftType?.TypeKind == TypeKind.Delegate || GetType(binary.Right)?.TypeKind == TypeKind.Delegate))
+            {
+                string comparison = kind == SyntaxKind.EqualsExpression ? "op_Equality" : "op_Inequality";
+                return EmitBinaryOperator(left, right, _objectType, comparison, _boolType, binary);
+            }
 
             string signature = UdonExternSignatures.BuiltinOperator(
                 operatorMethod.ContainingType,
