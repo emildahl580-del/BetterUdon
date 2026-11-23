@@ -41,6 +41,8 @@
 - Implicit numeric conversions are applied to extern constructor arguments. `new Vector3(0, 0, 0)` and
   similar Unity struct constructors now convert integer arguments to `float` instead of passing boxed
   integers to a `SystemSingle` extern.
+- Parenthesized, expression-bodied and simple lambdas are accepted as delegate arguments to user
+  constructors and methods, in addition to assignments and local initializers.
 
 ## 1.6.1
 

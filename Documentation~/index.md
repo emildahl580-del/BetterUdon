@@ -494,7 +494,8 @@ Supported delegate shapes include:
 - `System.Action<T>` and other `Action<...>` overloads
 - `System.Func<TResult>` and `System.Func<..., TResult>`
 
-A delegate value can come from a method group or a lambda:
+A delegate value can come from a method group or a lambda. Lambdas are accepted wherever a delegate
+value is expected, including constructor and method arguments:
 
 ```csharp
 private Action onReady;
@@ -508,6 +509,8 @@ private void Configure()
     onReady += () => Debug.Log("ready");
 
     transform = value => value * 2;
+
+    var item = new CallbackBox((Transform thing) => thing.position = Vector3.zero);
 }
 ```
 

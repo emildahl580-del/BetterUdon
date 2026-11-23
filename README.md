@@ -26,7 +26,8 @@ iterators, and no synchronous cross-behaviour calls. BetterUdon compiles a much 
 - **Properties**: auto properties, private setters, expression-bodied properties and properties with
   explicit getter/setter bodies.
 - **Delegates and events**: `Action`, `Action<T>`, `Func<..., TResult>`, method groups, capturing
-  lambdas, `+=`/`-=`, multicast events and cross-behaviour targets.
+  lambdas, `+=`/`-=`, multicast events and cross-behaviour targets. Lambdas work as constructor and
+  method arguments as well as assignments.
 - **Iterators**: `yield return` and `yield break`, lowered to a resumable state machine.
 - **Interfaces and inheritance**: virtual, override, abstract and interface calls for methods,
   properties and indexers, resolved against the project's closed world of behaviour types.

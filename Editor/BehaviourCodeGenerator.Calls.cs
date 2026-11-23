@@ -212,6 +212,12 @@ namespace BetterUdon.Editor
                     continue;
                 }
 
+                if (TryEmitDelegateValue(argument.Expression, parameter.Type, argument, out Slot delegateArgument))
+                {
+                    bound[target] = delegateArgument;
+                    continue;
+                }
+
                 bound[target] = EmitExpression(argument.Expression);
             }
 
@@ -794,8 +800,22 @@ namespace BetterUdon.Editor
             List<Slot> arguments = new List<Slot>();
             if (argumentList != null)
             {
-                foreach (ArgumentSyntax argument in argumentList.Arguments)
+                for (int i = 0; i < argumentList.Arguments.Count; i++)
+                {
+                    ArgumentSyntax argument = argumentList.Arguments[i];
+                    ITypeSymbol parameterType = constructor != null && i < constructor.Parameters.Length
+                        ? constructor.Parameters[i].Type
+                        : null;
+
+                    if (parameterType != null &&
+                        TryEmitDelegateValue(argument.Expression, parameterType, argument, out Slot delegateArgument))
+                    {
+                        arguments.Add(delegateArgument);
+                        continue;
+                    }
+
                     arguments.Add(EmitExpression(argument.Expression));
+                }
             }
 
             // Dictionary<K,V> is lowered to [ keys, values, count ].

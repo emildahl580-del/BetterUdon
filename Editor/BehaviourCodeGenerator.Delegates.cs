@@ -55,8 +55,32 @@ namespace BetterUdon.Editor
             }
         }
 
-        private bool TryEmitDelegateAssignment(LValue target, ExpressionSyntax value, SyntaxNode node)
+        private bool TryEmitDelegateValue(ExpressionSyntax expression, ITypeSymbol targetType, SyntaxNode node,
+            out Slot result)
         {
+            result = null;
+
+            if (!TryGetDelegateInvoke(targetType, out IMethodSymbol invoke))
+                return false;
+
+            ISymbol symbol = GetSymbolInfo(expression).Symbol;
+            IMethodSymbol lambda = symbol as IMethodSymbol;
+
+            if (lambda == null && expression is LambdaExpressionSyntax lambdaSyntax)
+                lambda = GetSymbolInfo(lambdaSyntax.Body).Symbol as IMethodSymbol;
+
+            if (lambda == null)
+                return false;
+
+            if (!TryGetDelegateMethod(expression, invoke, node, out IMethodSymbol method, out Slot target))
+                return true;
+
+            result = CreateDelegateArray(CreateDelegateEntry(target, GetDelegateMethodId(method),
+                CreateLambdaClosure(method, node)));
+            return true;
+        }
+
+        private bool TryEmitDelegateAssignment(LValue target, ExpressionSyntax value, SyntaxNode node)        {
             if (target == null || !TryGetDelegateInvoke(target.Type, out IMethodSymbol invoke))
                 return false;
 
