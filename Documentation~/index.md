@@ -340,6 +340,7 @@ inspector complexity bar exists to make that growth visible.
 | Feature | Lowering |
 | --- | --- |
 | `ref` / `out` / `out var` | inline, copy in, copy back after the call |
+| Implicit numeric conversions | integral → floating and floating → `double`, including extern constructor arguments |
 | `in` | inline, copy in only |
 | Named / optional / `params` | argument-to-parameter binding, constants, packing |
 | Local functions | inlined; captures resolve to enclosing slots |

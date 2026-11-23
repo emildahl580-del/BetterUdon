@@ -21,7 +21,8 @@ iterators, and no synchronous cross-behaviour calls. BetterUdon compiles a much 
 - **Recursion**: direct and mutual recursion through `[RecursiveMethod]`, with arguments, return values
   and a growable runtime frame stack.
 - **C# call semantics**: `ref`, `out`, `in`, `out var`, named and optional arguments, `params`, local
-  functions with captures.
+  functions with captures, and implicit numeric conversions such as passing `int` where a `float` is
+  expected.
 - **Properties**: auto properties, private setters, expression-bodied properties and properties with
   explicit getter/setter bodies.
 - **Delegates and events**: `Action`, `Action<T>`, `Func<..., TResult>`, method groups, capturing

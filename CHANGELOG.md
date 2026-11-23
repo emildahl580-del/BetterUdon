@@ -36,6 +36,12 @@
   properties.
 - Dictionary `KeyValuePair` foreach and `Keys`/`Values` foreach.
 
+### Fixed
+
+- Implicit numeric conversions are applied to extern constructor arguments. `new Vector3(0, 0, 0)` and
+  similar Unity struct constructors now convert integer arguments to `float` instead of passing boxed
+  integers to a `SystemSingle` extern.
+
 ## 1.6.1
 
 Bug sweep across the language, struct, recursion and cross-behaviour paths.

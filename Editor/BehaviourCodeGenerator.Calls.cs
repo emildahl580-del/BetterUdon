@@ -854,8 +854,13 @@ namespace BetterUdon.Editor
                 return result;
             }
 
-            foreach (Slot argument in arguments)
-                _asm.Push(argument);
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                ITypeSymbol parameterType = constructor != null && i < constructor.Parameters.Length
+                    ? constructor.Parameters[i].Type
+                    : null;
+                _asm.Push(ConvertTo(arguments[i], parameterType));
+            }
 
             _asm.Push(result);
             Extern(UdonExternSignatures.Method(constructor), $"constructor for '{type?.Name}'");
