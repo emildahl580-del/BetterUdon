@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.1.0
+
+### Added
+
+- Compiler output optimization with four independent toggles in the behaviour inspector's **Program**
+  box: remove redundant instructions, remove unreachable code, propagate copies and reuse heap slots.
+  The inspector recompiles immediately when a toggle changes, so the complexity bar shows the effect.
+  The recommended set is enabled by default; an explicit **None** is preserved.
+- Slot reuse performs control-flow and liveness analysis and only shares same-typed compiler
+  temporaries whose live ranges do not overlap. Exported, synced, constant and event-argument slots are
+  never shared. Copy propagation is limited to values that cannot change during the invocation.
+- The optimizer reconstructs Udon's evaluation stack, including values carried across extern calls and
+  `ref`/`out` operands, by reading each extern's input/output arity from the SDK node registry.
+
+### Fixed
+
+- Programs whose extern metadata is unavailable, or that carry values across a recursive jump, skip the
+  lifetime and copy passes instead of producing an unsafe program.
+
 ## 2.0.0
 
 ### Added

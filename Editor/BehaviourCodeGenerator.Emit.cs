@@ -199,6 +199,12 @@ namespace BetterUdon.Editor
             _asm.Extern(signature);
         }
 
+        private void Extern(string signature, string context, int[] byRefInputs)
+        {
+            ValidateExtern(signature, context);
+            _asm.Extern(signature, byRefInputs);
+        }
+
         private Slot IntConstant(int value)
         {
             Slot constant = ConstantSlot(_intType, value);
@@ -445,6 +451,7 @@ namespace BetterUdon.Editor
             // The VM writes event arguments by their exact symbol name (onPlayerJoinedPlayer,
             // amount__param, ...), so the heap variable cannot use the compiler's mangled names.
             Slot slot = _asm.AddSlot(name, UdonTypeSystem.GetStorageTypeName(type), type);
+            slot.IsParameter = true;
             _parameterSlots.Add(name, slot);
             return slot;
         }

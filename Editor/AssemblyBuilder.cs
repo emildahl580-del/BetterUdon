@@ -18,6 +18,22 @@ namespace BetterUdon.Editor
         public bool InitialIsThis;
 
         /// <summary>
+        /// True for compiler generated locals and temporaries that may be shared with another slot
+        /// whose lifetime does not overlap. Exported, synced, parameter and constant slots are never
+        /// reusable.
+        /// </summary>
+        public bool Reusable;
+
+        /// <summary>True for a compiler constant.</summary>
+        public bool IsConstant;
+
+        /// <summary>True for a user field. Fields can change through the public variable table.</summary>
+        public bool IsField;
+
+        /// <summary>True for an event argument supplied by Udon.</summary>
+        public bool IsParameter;
+
+        /// <summary>
         /// When set, the initial value becomes this label's bytecode address. Used for the return
         /// address of recursive calls.
         /// </summary>
@@ -35,14 +51,45 @@ namespace BetterUdon.Editor
 
     /// <summary>
     /// Builds the textual Udon assembly for a single program.
+    ///
+    /// Instructions are kept as structured lines instead of strings so that the optional optimizer can
+    /// analyse operand lifetimes and rewrite the program before addresses are resolved.
     /// </summary>
     internal sealed class AssemblyBuilder
     {
-        private sealed class Line
+        internal enum LineKind
         {
-            public string Text;
+            Instruction,
+            Comment,
+            Export,
+            Label,
+        }
+
+        internal sealed class Line
+        {
+            public LineKind Kind;
             public int Size;
-            public string LabelTarget; // when set the last operand is replaced with the resolved address
+
+            // Comment and export text (already includes any prefix).
+            public string Text;
+
+            // Instruction.
+            public string Op;
+            public string Operand;
+            public string JumpTarget;
+            public bool Halt;
+
+            /// <summary>
+            /// For an EXTERN, the zero based input operand indices that the extern writes back into
+            /// (ref/out arguments).
+            /// </summary>
+            public int[] ByRefInputs;
+
+            // Label.
+            public string Label;
+            public bool EmitLabel;
+
+            public bool Removed;
         }
 
         // Instruction sizes in bytes, matching the Udon bytecode encoding (one 4 byte word per
@@ -60,12 +107,13 @@ namespace BetterUdon.Editor
         private readonly List<Slot> _slots = new List<Slot>();
         private readonly List<string> _exportStatements = new List<string>();
         private readonly Dictionary<string, uint> _labels = new Dictionary<string, uint>();
-        private readonly List<string> _labelOrder = new List<string>();
+        private readonly HashSet<string> _labelNames = new HashSet<string>();
         private readonly HashSet<string> _externSignatures = new HashSet<string>();
-        private uint _address;
 
         public IReadOnlyList<Slot> Slots => _slots;
         public IReadOnlyCollection<string> ExternSignatures => _externSignatures;
+
+        internal List<Line> Lines => _lines;
 
         public Slot AddSlot(string name, string udonType, Microsoft.CodeAnalysis.ITypeSymbol type)
         {
@@ -81,16 +129,15 @@ namespace BetterUdon.Editor
 
         public void AddComment(string comment)
         {
-            _lines.Add(new Line { Text = "# " + comment, Size = 0 });
+            _lines.Add(new Line { Kind = LineKind.Comment, Text = "# " + comment });
         }
 
         public void MarkLabel(string name)
         {
-            if (_labels.ContainsKey(name))
+            if (!_labelNames.Add(name))
                 throw new InvalidOperationException($"Duplicate assembly label '{name}'.");
 
-            _labels.Add(name, _address);
-            _labelOrder.Add(name);
+            _lines.Add(new Line { Kind = LineKind.Label, Label = name });
         }
 
         /// <summary>
@@ -98,38 +145,37 @@ namespace BetterUdon.Editor
         /// </summary>
         public void MarkEntryPoint(string name)
         {
-            if (_labels.ContainsKey(name))
+            if (!_labelNames.Add(name))
                 throw new InvalidOperationException($"Duplicate assembly label '{name}'.");
 
-            _labels.Add(name, _address);
-            _labelOrder.Add(name);
-
-            _lines.Add(new Line { Text = ".export " + name, Size = 0 });
-            _lines.Add(new Line { Text = name + ":", Size = 0 });
+            _lines.Add(new Line { Kind = LineKind.Export, Text = ".export " + name });
+            _lines.Add(new Line { Kind = LineKind.Label, Label = name, EmitLabel = true });
         }
 
-        public bool HasLabel(string name) => _labels.ContainsKey(name);
+        public bool HasLabel(string name) => _labelNames.Contains(name);
 
-        public void Push(Slot slot) => AddLine($"PUSH, {slot.Name}", SizePush);
+        public void Push(Slot slot) => AddInstruction("PUSH", slot.Name, SizePush);
 
-        public void Pop() => AddLine("POP", SizePop);
+        public void Pop() => AddInstruction("POP", null, SizePop);
 
         public void Copy(Slot source, Slot target)
         {
             Push(source);
             Push(target);
-            AddLine("COPY", SizeCopy);
+            AddInstruction("COPY", null, SizeCopy);
         }
 
-        public void Jump(string label) => AddLine(null, SizeJump, label, "JUMP, 0x{0:X8}");
+        public void Jump(string label) =>
+            AddInstruction("JUMP", null, SizeJump, label);
 
         public void JumpIfFalse(Slot condition, string label)
         {
             Push(condition);
-            AddLine(null, SizeJumpIfFalse, label, "JUMP_IF_FALSE, 0x{0:X8}");
+            AddInstruction("JUMP_IF_FALSE", null, SizeJumpIfFalse, label);
         }
 
-        public void JumpIndirect(Slot addressSlot) => AddLine($"JUMP_INDIRECT, {addressSlot.Name}", SizeJumpIndirect);
+        public void JumpIndirect(Slot addressSlot) =>
+            AddInstruction("JUMP_INDIRECT", addressSlot.Name, SizeJumpIndirect);
 
         /// <summary>
         /// Copies the value whose address is on top of the evaluation stack into <paramref name="target"/>.
@@ -138,33 +184,80 @@ namespace BetterUdon.Editor
         public void CopyFromTop(Slot target)
         {
             Push(target);
-            AddLine("COPY", SizeCopy);
+            AddInstruction("COPY", null, SizeCopy);
         }
 
         public void Extern(string signature)
         {
-            _externSignatures.Add(signature);
-            AddLine($"EXTERN, \"{signature}\"", SizeExtern);
+            Extern(signature, null);
         }
 
-        public void Nop() => AddLine("NOP", SizeNop);
+        /// <summary>
+        /// Emits an extern call. <paramref name="byRefInputs"/> lists the input operand indices that
+        /// the extern writes back into, so the optimizer sees those slots as definitions.
+        /// </summary>
+        public void Extern(string signature, int[] byRefInputs)
+        {
+            _externSignatures.Add(signature);
+            AddInstruction("EXTERN", signature, SizeExtern);
+            _lines[_lines.Count - 1].ByRefInputs = byRefInputs;
+        }
+
+        public void Nop() => AddInstruction("NOP", null, SizeNop);
 
         /// <summary>
         /// Ends execution of the program (jumps past the end of the byte code).
         /// </summary>
-        public void Halt() => AddLine("JUMP, 0xFFFFFFFC", SizeJump);
+        public void Halt() => AddInstruction("JUMP", null, SizeJump, null, true);
 
-        private void AddLine(string text, int size)
+        private void AddInstruction(string op, string operand, int size, string jumpTarget = null, bool halt = false)
         {
-            _lines.Add(new Line { Text = text, Size = size });
-            _address += (uint)size;
+            _lines.Add(new Line
+            {
+                Kind = LineKind.Instruction,
+                Op = op,
+                Operand = operand,
+                Size = size,
+                JumpTarget = jumpTarget,
+                Halt = halt,
+            });
         }
 
-        private void AddLine(string _, int size, string labelTarget, string format)
+        /// <summary>
+        /// Runs the requested buffer optimizations. No-op instructions are removed, unreachable code is
+        /// dropped and compiler temporaries are coalesced. Slots are only ever shared when their live
+        /// ranges do not overlap and their heap storage type is identical.
+        /// </summary>
+        public void Optimize(UdonOptimizationFlags flags)
         {
-            _lines.Add(new Line { Text = format, Size = size, LabelTarget = labelTarget });
-            _address += (uint)size;
+            if (flags == UdonOptimizationFlags.None)
+                return;
+
+            UdonAssemblyOptimizer.Optimize(this, flags);
         }
+
+        /// <summary>
+        /// Computes the address of every label from the current (possibly optimized) instruction list.
+        /// </summary>
+        internal void ComputeLabelAddresses()
+        {
+            _labels.Clear();
+
+            uint address = 0;
+
+            foreach (Line line in _lines)
+            {
+                if (line.Removed)
+                    continue;
+
+                if (line.Kind == LineKind.Label)
+                    _labels[line.Label] = address;
+                else if (line.Kind == LineKind.Instruction)
+                    address += (uint)line.Size;
+            }
+        }
+
+        internal List<Slot> MutableSlots => _slots;
 
         /// <summary>
         /// Computes the number of heap values the assembler will create: one per declared symbol plus
@@ -177,6 +270,9 @@ namespace BetterUdon.Editor
 
         public string BuildAssembly()
         {
+            PruneExterns();
+            ComputeLabelAddresses();
+
             StringBuilder builder = new StringBuilder();
 
             // Label addresses are final once every instruction has been added, so address constants can
@@ -213,24 +309,82 @@ namespace BetterUdon.Editor
 
             foreach (Line line in _lines)
             {
-                if (line.LabelTarget != null)
-                {
-                    if (!_labels.TryGetValue(line.LabelTarget, out uint target))
-                        throw new InvalidOperationException($"Jump to undefined label '{line.LabelTarget}'.");
+                if (line.Removed)
+                    continue;
 
-                    builder.Append("        ").Append(string.Format(line.Text, target)).Append('\n');
-                }
-                else
+                switch (line.Kind)
                 {
-                    if (line.Text.StartsWith("#", StringComparison.Ordinal))
+                    case LineKind.Comment:
                         builder.Append(line.Text).Append('\n');
-                    else
+                        break;
+
+                    case LineKind.Export:
                         builder.Append("        ").Append(line.Text).Append('\n');
+                        break;
+
+                    case LineKind.Label:
+                        if (line.EmitLabel)
+                            builder.Append("        ").Append(line.Label).Append(":\n");
+                        break;
+
+                    case LineKind.Instruction:
+                        builder.Append("        ").Append(FormatInstruction(line)).Append('\n');
+                        break;
                 }
             }
 
             builder.Append(".code_end\n");
             return builder.ToString();
+        }
+
+        private void PruneExterns()
+        {
+            _externSignatures.Clear();
+
+            foreach (Line line in _lines)
+            {
+                if (!line.Removed && line.Kind == LineKind.Instruction && line.Op == "EXTERN")
+                    _externSignatures.Add(line.Operand);
+            }
+        }
+
+        private string FormatInstruction(Line line)
+        {
+            switch (line.Op)
+            {
+                case "PUSH":
+                    return "PUSH, " + line.Operand;
+
+                case "POP":
+                case "COPY":
+                case "NOP":
+                    return line.Op;
+
+                case "JUMP":
+                    return line.Halt
+                        ? "JUMP, 0xFFFFFFFC"
+                        : "JUMP, 0x" + ResolveLabel(line.JumpTarget).ToString("X8");
+
+                case "JUMP_IF_FALSE":
+                    return "JUMP_IF_FALSE, 0x" + ResolveLabel(line.JumpTarget).ToString("X8");
+
+                case "JUMP_INDIRECT":
+                    return "JUMP_INDIRECT, " + line.Operand;
+
+                case "EXTERN":
+                    return "EXTERN, \"" + line.Operand + "\"";
+
+                default:
+                    return line.Op;
+            }
+        }
+
+        private uint ResolveLabel(string label)
+        {
+            if (label != null && _labels.TryGetValue(label, out uint target))
+                return target;
+
+            throw new InvalidOperationException($"Jump to undefined label '{label}'.");
         }
     }
 }

@@ -50,6 +50,26 @@ namespace BetterUdon.Editor
         [SerializeField, HideInInspector]
         private int syncModeOverride;
 
+        [SerializeField, HideInInspector]
+        private int optimizationFlags = -1;
+
+        [SerializeField, HideInInspector]
+        private bool optimizationInitialized;
+
+        /// <summary>
+        /// The optimization passes used the next time this program is compiled. Stored on the asset so
+        /// two behaviours that share a program asset also share its compiler settings.
+        /// </summary>
+        public UdonOptimizationFlags OptimizationFlags
+        {
+            get => optimizationFlags < 0 ? UdonOptimizationFlags.Recommended : (UdonOptimizationFlags)optimizationFlags;
+            set
+            {
+                optimizationFlags = (int)value;
+                optimizationInitialized = true;
+            }
+        }
+
         [NonSerialized] private List<CompileDiagnostic> _lastDiagnostics = new List<CompileDiagnostic>();
 
         [NonSerialized] private VRC.SDK3.UdonNetworkCalling.NetworkCallingEntrypointMetadata[] _networkMetadata =
@@ -136,6 +156,14 @@ namespace BetterUdon.Editor
 
         protected override void RefreshProgramImpl()
         {
+            if (!optimizationInitialized)
+            {
+                // Assets created before the optimizer settings existed default to the recommended,
+                // behaviour preserving set. An explicit "None" from the inspector is preserved.
+                optimizationFlags = (int)UdonOptimizationFlags.Recommended;
+                optimizationInitialized = true;
+            }
+
             if (sourceScript == null)
             {
                 assemblyError = "No source script assigned.";
@@ -144,7 +172,7 @@ namespace BetterUdon.Editor
             }
 
             string sourcePath = GetSourcePath(sourceScript);
-            List<BetterUdonCompileResult> results = BetterUdonCompiler.CompileFile(sourcePath);
+            List<BetterUdonCompileResult> results = BetterUdonCompiler.CompileFile(sourcePath, OptimizationFlags);
 
             BetterUdonCompileResult result = results.FirstOrDefault(r => r.ClassName == className)
                                              ?? results.FirstOrDefault();
@@ -405,6 +433,15 @@ namespace BetterUdon.Editor
                 {
                     EditorGUILayout.HelpBox("The assembly could not be built:\n" + assemblyError, MessageType.Error);
                 }
+            }
+
+            EditorGUILayout.Space(8f);
+
+            // Compiler settings. Changing a toggle recompiles the program immediately.
+            if (BetterUdonOptimizationGUI.Draw(this))
+            {
+                RefreshProgram();
+                dirty = true;
             }
 
             // The values the script exposes, on their own. Collapsed by default because synced structs

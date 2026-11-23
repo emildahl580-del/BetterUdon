@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 2.0.0**
+**Version 2.1.0**
 
 BetterUdon compiles C# into ordinary Udon assembly for VRChat worlds. It uses VRChat's assembler and
 runs on the stock Udon VM. There is no BetterUdon runtime, no custom interpreter and no hidden scene
@@ -183,6 +183,35 @@ Before a program is stored, BetterUdon:
 
 The serializer fails softly — it logs a bad value and loses the symbol table — so this round trip is
 required for reliable assets.
+
+### 3.6 Output optimization
+
+After lowering, `UdonAssemblyOptimizer` may rewrite the structured instruction list before addresses
+are resolved. The passes are independent and controlled by `UdonOptimizationFlags` stored on the
+program asset:
+
+| Flag | Work performed |
+| --- | --- |
+| `Peephole` | Removes NOPs, self copies, push/pop pairs and jumps to the next instruction |
+| `DeadCode` | Removes instructions after an unconditional jump or halt, threads jump chains and drops unused compiler slots |
+| `CopyPropagation` | Replaces copies from constants, event arguments and `this`, and removes copies whose result is never read |
+| `SlotReuse` | Computes a control-flow graph, live-in/live-out sets and an interference graph, then coalesces copy pairs and colours same-typed temporaries |
+
+`Recommended` is all four; `None` leaves the lowering untouched. The inspector sets
+`BetterUdonProgramAsset.OptimizationFlags`, recompiles immediately when a box changes and redraws the
+complexity bar from the new metrics.
+
+Safety rules:
+
+- Exported fields, synced variables, constants, event arguments and recursion return-address slots
+  are never reused or removed.
+- Only compiler-generated locals and temporaries (`__…` slots) are candidates.
+- Two slots are shared only when their Udon storage type matches and their live ranges do not overlap.
+- The parser follows Udon's evaluation stack, including values carried across an extern call. It uses
+  the SDK node registry for each extern's input/output arity and treats `ref`/`out` operands as writes.
+- If an arity is unknown or a value is carried across a recursive jump, the lifetime and copy passes
+  decline to run for that program rather than guessing. Peephole and unreachable-code removal are
+  still safe and still run.
 
 ---
 

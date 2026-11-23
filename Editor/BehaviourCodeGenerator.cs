@@ -28,6 +28,7 @@ namespace BetterUdon.Editor
     {
         private readonly SemanticModel _model;
         private readonly INamedTypeSymbol _behaviourType;
+        private readonly UdonOptimizationFlags _optimizationFlags;
         private readonly AssemblyBuilder _asm = new AssemblyBuilder();
         private readonly List<CompileDiagnostic> _diagnostics = new List<CompileDiagnostic>();
         private readonly Dictionary<ISymbol, Slot> _fieldSlots = new Dictionary<ISymbol, Slot>(SymbolEqualityComparer.Default);
@@ -65,10 +66,12 @@ namespace BetterUdon.Editor
 
         public IReadOnlyList<CompileDiagnostic> Diagnostics => _diagnostics;
 
-        public BehaviourCodeGenerator(SemanticModel model, INamedTypeSymbol behaviourType)
+        public BehaviourCodeGenerator(SemanticModel model, INamedTypeSymbol behaviourType,
+            UdonOptimizationFlags optimizationFlags = UdonOptimizationFlags.Recommended)
         {
             _model = model;
             _behaviourType = behaviourType;
+            _optimizationFlags = optimizationFlags;
         }
 
         public string TypeName => _behaviourType.ToDisplayString();
@@ -206,6 +209,8 @@ namespace BetterUdon.Editor
             foreach (KeyValuePair<ISymbol, Slot> pair in _fieldSlots)
                 RegisterStructLayouts(pair.Key is IFieldSymbol field ? field.Type : null);
 
+            _asm.Optimize(_optimizationFlags);
+
             if (_asm.Slots.Count > BetterUdonComplexity.SlotBudget)
             {
                 AddError($"This program generated {_asm.Slots.Count} heap slots. Generic or method " +
@@ -281,6 +286,7 @@ namespace BetterUdon.Editor
             // Lets GetComponent<T>() on another object check that the behaviour it found is really T.
             Slot typeMarker = _asm.AddSlot(TypeMarkerSymbol, "SystemString", _stringType);
             typeMarker.InitialValue = _behaviourType.ToDisplayString();
+            typeMarker.IsConstant = true;
         }
 
         private void CreateFieldSlots()
@@ -315,6 +321,7 @@ namespace BetterUdon.Editor
 
                 Slot slot = _asm.AddSlot(GetSlotName(field), storageType, field.Type);
                 slot.Exported = exported;
+                slot.IsField = true;
                 slot.SyncMode = structSync ? null : syncMode;
                 slot.InitialValue = EvaluateFieldInitializer(field);
 
@@ -711,7 +718,9 @@ namespace BetterUdon.Editor
         {
             type = Substitute(type);
             string name = "__" + UdonTypeSystem.Sanitize(hint ?? "tmp") + "_" + (_slotCounter++);
-            return _asm.AddSlot(name, UdonTypeSystem.GetStorageTypeName(type), type);
+            Slot slot = _asm.AddSlot(name, UdonTypeSystem.GetStorageTypeName(type), type);
+            slot.Reusable = true;
+            return slot;
         }
 
         private ITypeSymbol MakeArrayType(ITypeSymbol elementType)
@@ -745,6 +754,7 @@ namespace BetterUdon.Editor
 
             Slot slot = _asm.AddSlot("__const_" + (_constantSlots.Count), udonType, type);
             slot.InitialValue = value;
+            slot.IsConstant = true;
             _constantSlots.Add(key, slot);
 
             return slot;

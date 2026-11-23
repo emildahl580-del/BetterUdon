@@ -62,7 +62,7 @@ namespace BetterUdon.Editor
             if (programAsset != null)
             {
                 EditorGUILayout.Space(4f);
-                DrawProgramBox(programAsset);
+                DrawProgramBox(behaviour, programAsset);
             }
 
             if (changed)
@@ -137,11 +137,19 @@ namespace BetterUdon.Editor
             }
         }
 
-        private void DrawProgramBox(BetterUdonProgramAsset programAsset)
+        private void DrawProgramBox(BetterUdonBehaviour behaviour, BetterUdonProgramAsset programAsset)
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 BetterUdonInspectorGUI.SectionTitle("Program");
+
+                if (BetterUdonOptimizationGUI.Draw(programAsset) && behaviour != null)
+                {
+                    // Recompile immediately so the complexity bar shows the effect of the toggle.
+                    programAsset.RefreshProgram();
+                    BetterUdonEditorUtility.SetupBackingBehaviour(behaviour, false);
+                    BetterUdonEditorUtility.SyncFieldsToUdon(behaviour);
+                }
 
                 BetterUdonComplexity.Draw(programAsset);
 

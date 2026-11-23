@@ -308,20 +308,35 @@ namespace BetterUdon.Editor
             string signature = UdonExternSignatures.Method(method);
             Slot externResult = method.ReturnsVoid ? null : NewSlot(method.ReturnType, "call");
 
+            List<int> byRefInputs = new List<int>();
+            int operandIndex = 0;
+
             if (instance != null)
+            {
                 _asm.Push(instance);
+                operandIndex++;
+            }
 
             for (int i = 0; i < arguments.Count && i < method.Parameters.Length; i++)
             {
                 // ref/out arguments are passed as the caller's heap slot so the extern writes back into it.
                 bool byReference = method.Parameters[i].RefKind == RefKind.Ref || method.Parameters[i].RefKind == RefKind.Out;
+
+                if (byReference)
+                    byRefInputs.Add(operandIndex);
+
                 _asm.Push(byReference ? arguments[i] : ConvertTo(arguments[i], method.Parameters[i].Type));
+                operandIndex++;
             }
 
             if (externResult != null)
                 _asm.Push(externResult);
 
-            Extern(signature, $"call to '{method.Name}'");
+            if (byRefInputs.Count > 0)
+                Extern(signature, $"call to '{method.Name}'", byRefInputs.ToArray());
+            else
+                Extern(signature, $"call to '{method.Name}'");
+
             return externResult;
         }
 

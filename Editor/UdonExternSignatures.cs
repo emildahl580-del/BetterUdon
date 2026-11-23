@@ -221,13 +221,35 @@ namespace BetterUdon.Editor
         public static UdonRegistry Instance => _instance ?? (_instance = new UdonRegistry());
 
         private readonly HashSet<string> _definitions = new HashSet<string>();
+        private readonly Dictionary<string, UdonNodeArity> _arities = new Dictionary<string, UdonNodeArity>(StringComparer.Ordinal);
         private readonly Dictionary<string, UdonEventDefinition> _events = new Dictionary<string, UdonEventDefinition>();
+
+        internal readonly struct UdonNodeArity
+        {
+            public readonly int Inputs;
+            public readonly int Outputs;
+
+            public UdonNodeArity(int inputs, int outputs)
+            {
+                Inputs = inputs;
+                Outputs = outputs;
+            }
+        }
 
         public bool IsAvailable => _definitions.Count > 0;
 
         public IEnumerable<string> Definitions => _definitions;
 
         public bool HasExtern(string signature) => _definitions.Count == 0 || _definitions.Contains(signature);
+
+        /// <summary>
+        /// Number of heap operands an extern consumes from the evaluation stack, including its result
+        /// address. Returns false when the installed Udon registry has no matching node.
+        /// </summary>
+        public bool TryGetArity(string signature, out UdonNodeArity arity)
+        {
+            return _arities.TryGetValue(signature, out arity);
+        }
 
         public bool TryGetEvent(string methodName, out UdonEventDefinition definition)
         {
@@ -244,7 +266,12 @@ namespace BetterUdon.Editor
                 foreach (UdonNodeDefinition definition in editorInterface.GetNodeDefinitions())
                 {
                     if (!string.IsNullOrEmpty(definition.fullName))
+                    {
                         _definitions.Add(definition.fullName);
+                        _arities[definition.fullName] = new UdonNodeArity(
+                            definition.Inputs != null ? definition.Inputs.Count : 0,
+                            definition.Outputs != null ? definition.Outputs.Count : 0);
+                    }
                 }
 
                 foreach (UdonNodeDefinition definition in editorInterface.GetNodeDefinitions("Event_"))

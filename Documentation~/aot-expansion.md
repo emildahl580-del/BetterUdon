@@ -110,6 +110,18 @@ Reassess what pure AOT can still cover once the above land:
 - [~] More BCL helpers that map to existing externs or lowered code.
 - [—] Async/coroutine scheduling and manual enumerators, excluded by project direction.
 
+## 7. Output optimization
+
+- [x] Peephole cleanup: NOPs, self copies, push/pop pairs and jumps to the next instruction.
+- [x] Unreachable code after an unconditional jump or halt, plus unused compiler slots.
+- [x] Copy propagation from constants, event arguments and `this`; dead copy removal.
+- [x] Control-flow and liveness analysis with copy coalescing and same-typed slot colouring.
+- [x] Inspector toggles stored on the program asset; toggling recompiles and redraws the complexity
+      bar immediately. `Recommended` is the default for new and existing assets.
+- [x] SAFETY: exported, synced, field, constant, parameter and return-address slots are never shared or
+      removed. Unknown extern arity or a stack carried across a recursive jump disables the lifetime
+      passes for that program instead of guessing.
+
 ## Rules
 
 - Stock Udon only: no custom runtime, no native code, no Unity Jobs, no compute shaders.

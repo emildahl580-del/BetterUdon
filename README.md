@@ -138,7 +138,7 @@ The details that matter:
 
 ## Install
 
-BetterUdon is a Unity package. `main` is the 2.0 line; use a pinned tag if you want a fixed point.
+BetterUdon is a Unity package. `main` is the 2.x line; use a pinned tag if you want a fixed point.
 
 1. Open **Window > Package Manager**.
 2. Press **+** → **Add package from git URL…**
@@ -150,10 +150,10 @@ BetterUdon is a Unity package. `main` is the 2.0 line; use a pinned tag if you w
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   Pinned 2.0 release:
+   Pinned 2.1 release:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v2.0.0
+   https://github.com/emildahl580-del/BetterUdon.git#v2.1.0
    ```
 
    Development branch:
@@ -168,7 +168,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer**. The package declares `com.vrcha
 ### Other installs
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`.
-- **Zip** — take `BetterUdon-2.0.0.zip` from the
+- **Zip** — take `BetterUdon-2.1.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy the package folder into your project's `Packages/` directory.
 
@@ -226,6 +226,29 @@ each behaviour into a Udon program:
 
 Nothing custom runs in the world. At runtime it is stock Udon: the same VM, heap and externs as any
 other world.
+
+### Output optimization
+
+The compiled program is optimized by default. The behaviour inspector's **Program** box has four
+independent tick boxes, and changing one recompiles the program immediately so the complexity bar shows
+the effect:
+
+| Toggle | What it removes |
+| --- | --- |
+| Remove redundant instructions | NOPs, self copies, push/pop pairs and jumps to the next instruction |
+| Remove unreachable code | Code after an unconditional jump or halt, plus unused compiler temporaries |
+| Propagate copies | Copies from constants, event arguments and `this` into temporaries, and dead copies |
+| Reuse heap slots | Compiler temporaries whose live ranges do not overlap |
+
+**Recommended** enables all four; **None** leaves the raw lowering untouched. The optimizer never
+removes or shares an exported field, a synced variable, a constant or an event argument, so the
+inspector's public variables and the network layout keep working. It only rewrites compiler-generated
+locals and temporaries.
+
+Slot reuse uses a control-flow and liveness analysis. Two slots are only shared when their live ranges
+do not overlap and their Udon storage type is identical. Programs that carry values across a recursive
+call's evaluation stack, or whose extern metadata is unavailable, skip the lifetime rewrites instead
+of guessing.
 
 ## Feature notes
 

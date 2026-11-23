@@ -76,15 +76,25 @@ namespace BetterUdon.Editor
         /// </summary>
         public static List<BetterUdonCompileResult> CompileFile(string sourcePath)
         {
+            return CompileFile(sourcePath, UdonOptimizationFlags.Recommended);
+        }
+
+        /// <summary>
+        /// Compiles every BetterUdonBehaviour declared in the given source file using the requested
+        /// output optimizations.
+        /// </summary>
+        public static List<BetterUdonCompileResult> CompileFile(string sourcePath, UdonOptimizationFlags optimizationFlags)
+        {
             List<BetterUdonCompileResult> results = new List<BetterUdonCompileResult>();
 
             if (string.IsNullOrEmpty(sourcePath) || !File.Exists(sourcePath))
                 return results;
 
             sourcePath = Path.GetFullPath(sourcePath);
+            string cacheKey = sourcePath + "|" + (int)optimizationFlags;
 
             DateTime stamp = GetSourcesStamp();
-            if (_resultCacheStamp == stamp && _resultCache.TryGetValue(sourcePath, out List<BetterUdonCompileResult> cached))
+            if (_resultCacheStamp == stamp && _resultCache.TryGetValue(cacheKey, out List<BetterUdonCompileResult> cached))
                 return cached;
 
             try
@@ -111,7 +121,7 @@ namespace BetterUdon.Editor
                     if (classSymbol == null || !DerivesFromBetterUdonBehaviour(classSymbol))
                         continue;
 
-                    results.Add(CompileBehaviour(model, classSymbol));
+                    results.Add(CompileBehaviour(model, classSymbol, optimizationFlags));
                 }
 
                 if (results.Count == 0)
@@ -143,7 +153,7 @@ namespace BetterUdon.Editor
                 });
             }
 
-            _resultCache[sourcePath] = results;
+            _resultCache[cacheKey] = results;
             return results;
         }
 
@@ -192,14 +202,15 @@ namespace BetterUdon.Editor
             return false;
         }
 
-        private static BetterUdonCompileResult CompileBehaviour(SemanticModel model, INamedTypeSymbol classSymbol)
+        private static BetterUdonCompileResult CompileBehaviour(SemanticModel model, INamedTypeSymbol classSymbol,
+            UdonOptimizationFlags optimizationFlags)
         {
             BetterUdonCompileResult result = new BetterUdonCompileResult
             {
                 ClassName = classSymbol.Name,
             };
 
-            BehaviourCodeGenerator generator = new BehaviourCodeGenerator(model, classSymbol);
+            BehaviourCodeGenerator generator = new BehaviourCodeGenerator(model, classSymbol, optimizationFlags);
             string assembly = generator.Compile();
 
             result.Diagnostics.AddRange(generator.Diagnostics);
