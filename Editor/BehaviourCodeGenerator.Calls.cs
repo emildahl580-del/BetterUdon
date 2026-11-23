@@ -75,6 +75,9 @@ namespace BetterUdon.Editor
             if (IsCompilerIntrinsic(method))
                 return EmitIntrinsic(method, invocation);
 
+            if (TryEmitInstantiate(method, invocation, out Slot instantiateResult))
+                return instantiateResult;
+
             if (method.IsGenericMethod && TryEmitGenericUnityMethod(method, invocation, out Slot genericResult))
                 return genericResult;
 
@@ -409,6 +412,86 @@ namespace BetterUdon.Editor
         }
 
         private ITypeSymbol _componentTypeSymbol => _model.Compilation.GetTypeByMetadataName("UnityEngine.Component");
+
+        /// <summary>
+        /// Lowers <c>Instantiate</c> for GameObjects and BetterUdon behaviours.
+        ///
+        /// Udon only exposes <c>VRCInstantiate</c> for GameObjects. A behaviour reference is expanded
+        /// to its backing GameObject, cloned, and resolved back to the matching UdonBehaviour with the
+        /// same type-marker lookup used by <c>GetComponent&lt;T&gt;()</c>.
+        /// </summary>
+        private bool TryEmitInstantiate(IMethodSymbol method, InvocationExpressionSyntax invocation, out Slot result)
+        {
+            result = null;
+
+            if (method.Name != "Instantiate" ||
+                !method.IsStatic ||
+                GetFullName(method.ContainingType) != "UnityEngine.Object")
+            {
+                return false;
+            }
+
+            if (invocation.ArgumentList.Arguments.Count == 0)
+                return false;
+
+            if (invocation.ArgumentList.Arguments.Count != 1)
+            {
+                AddError("Instantiate with parent, position or rotation arguments is not supported yet. " +
+                         "Instantiate the object first and then set its transform.", invocation);
+                result = method.ReturnsVoid ? null : NewSlot(method.ReturnType, "bad");
+                return true;
+            }
+
+            ExpressionSyntax argumentExpression = invocation.ArgumentList.Arguments[0].Expression;
+            ITypeSymbol argumentType = GetType(argumentExpression);
+            Slot argument = EmitExpression(argumentExpression);
+
+            if (argumentType == null)
+                return false;
+
+            if (DerivesFromBetterUdon(argumentType))
+            {
+                Slot sourceObject = EmitGetGameObject(argument);
+                Slot cloneObject = EmitInstantiateGameObject(sourceObject);
+
+                ITypeSymbol behaviourType = method.IsGenericMethod && method.TypeArguments.Length == 1
+                    ? Substitute(method.TypeArguments[0])
+                    : argumentType;
+
+                Slot clone = EmitFindBehaviour(cloneObject, "UnityEngineGameObject", behaviourType, invocation);
+                result = ConvertTo(clone, Substitute(method.ReturnType));
+                return true;
+            }
+
+            if (GetFullName(argumentType) == "UnityEngine.GameObject")
+            {
+                Slot cloneObject = EmitInstantiateGameObject(argument);
+                result = ConvertTo(cloneObject, Substitute(method.ReturnType));
+                return true;
+            }
+
+            AddError("Instantiate is supported for GameObjects and BetterUdon behaviours.", invocation);
+            result = NewSlot(method.ReturnType, "bad");
+            return true;
+        }
+
+        private Slot EmitGetGameObject(Slot component)
+        {
+            Slot gameObject = NewSlot(_model.Compilation.GetTypeByMetadataName("UnityEngine.GameObject"), "instantiateSource");
+            _asm.Push(component);
+            _asm.Push(gameObject);
+            Extern("UnityEngineComponent.__get_gameObject__UnityEngineGameObject", "gameObject");
+            return gameObject;
+        }
+
+        private Slot EmitInstantiateGameObject(Slot source)
+        {
+            Slot clone = NewSlot(_model.Compilation.GetTypeByMetadataName("UnityEngine.GameObject"), "instantiateClone");
+            _asm.Push(source);
+            _asm.Push(clone);
+            Extern("VRCInstantiate.__Instantiate__UnityEngineGameObject__UnityEngineGameObject", "Instantiate");
+            return clone;
+        }
 
         /// <summary>
         /// Udon exposes a handful of generic Unity methods with an extra <c>SystemType</c> parameter and

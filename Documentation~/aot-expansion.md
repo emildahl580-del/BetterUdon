@@ -122,6 +122,16 @@ Reassess what pure AOT can still cover once the above land:
       removed. Unknown extern arity or a stack carried across a recursive jump disables the lifetime
       passes for that program instead of guessing.
 
+## 8. Cross-behaviour cloning
+
+- [x] `Instantiate(BetterUdonBehaviour)` lowers to backing `GameObject` → `VRCInstantiate` →
+      type-marker `GetComponent` on the clone, returning the cloned behaviour reference.
+- [x] `Instantiate(GameObject)` returns the clone GameObject.
+- [x] `Destroy(clone.gameObject)` removes the spawned object; `Destroy(clone)` keeps Unity's
+      component-only behaviour.
+- [—] `Instantiate` overloads with parent / position / rotation. Instantiate first, then set the
+      transform; add the overloads when the transform composition is worth the extra slots.
+
 ## Rules
 
 - Stock Udon only: no custom runtime, no native code, no Unity Jobs, no compute shaders.

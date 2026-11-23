@@ -1,6 +1,6 @@
 # BetterUdon — A C# to Udon Compiler for VRChat Worlds
 
-**Version 2.1.0**
+**Version 2.2.0**
 
 BetterUdon compiles C# into ordinary Udon assembly for VRChat worlds. It uses VRChat's assembler and
 runs on the stock Udon VM. There is no BetterUdon runtime, no custom interpreter and no hidden scene
@@ -662,6 +662,37 @@ when the target must run on its own schedule.
 
 `GetComponentInChildren` / `GetComponentInParent` are not supported for behaviour types because Udon
 cannot search by behaviour type; pass the `GameObject` and call `GetComponent` on it.
+
+### 12.1 Instantiate and Destroy
+
+Udon only exposes `VRCInstantiate` for GameObjects. BetterUdon adds a compiler special case so a
+behaviour reference can be cloned directly:
+
+```csharp
+[SerializeField] private BetterUdonCubeBehaviour cubePrefab;
+
+public void Spawn()
+{
+    BetterUdonCubeBehaviour clone = Instantiate(cubePrefab);
+    clone.Tint(Color.red);
+
+    GameObject cloneObject = Instantiate(cubePrefab.gameObject);
+    BetterUdonCubeBehaviour lookup = cloneObject.GetComponent<BetterUdonCubeBehaviour>();
+}
+```
+
+The lowering is:
+
+1. read the original behaviour's `gameObject`;
+2. call `VRCInstantiate.Instantiate` on it;
+3. resolve the clone's backing `UdonBehaviour` with the same type-marker scan as
+   `GetComponent<T>()`.
+
+`Instantiate(gameObject)` returns the clone GameObject. The clone's C# component values are the
+edit-time surface; the running program uses the clone's own Udon heap. `Destroy(clone)` removes only the
+component, exactly like Unity, so use `Destroy(clone.gameObject)` to remove the spawned object.
+`Instantiate` overloads with a parent, position or rotation are not supported yet; instantiate first and
+then set the transform.
 
 Several BetterUdon behaviours can live on one GameObject, including two components of the same type.
 Each proxy owns its own backing `UdonBehaviour`.

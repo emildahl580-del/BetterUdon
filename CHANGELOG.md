@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.0
+
+### Added
+
+- `Instantiate` support for BetterUdon behaviour references. `Instantiate(aCube)` clones the backing
+  GameObject and returns the clone's own backing `UdonBehaviour`, typed as the behaviour, so methods and
+  fields can be used immediately. `Instantiate(gameObject)` returns the clone GameObject.
+- `GetComponent<T>()` on the cloned object continues to resolve the backing behaviour through the
+  type-marker lookup, and `Destroy(clone.gameObject)` removes the spawned object.
+- The cross-behaviour documentation explains cloning, the edit-time C# component versus the runtime Udon
+  heap, and the currently unsupported `Instantiate` overloads with parent/position/rotation.
+
 ## 2.1.0
 
 ### Added

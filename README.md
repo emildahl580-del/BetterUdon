@@ -150,10 +150,10 @@ BetterUdon is a Unity package. `main` is the 2.x line; use a pinned tag if you w
    https://github.com/emildahl580-del/BetterUdon.git
    ```
 
-   Pinned 2.1 release:
+   Pinned 2.2 release:
 
    ```
-   https://github.com/emildahl580-del/BetterUdon.git#v2.1.0
+   https://github.com/emildahl580-del/BetterUdon.git#v2.2.0
    ```
 
    Development branch:
@@ -168,7 +168,7 @@ Requires **VRChat SDK – Worlds 3.5 or newer**. The package declares `com.vrcha
 ### Other installs
 
 - **Local clone** — `git clone https://github.com/emildahl580-del/BetterUdon.git Packages/com.betterudon`.
-- **Zip** — take `BetterUdon-2.1.0.zip` from the
+- **Zip** — take `BetterUdon-2.2.0.zip` from the
   [releases page](https://github.com/emildahl580-del/BetterUdon/releases) and extract it into `Packages/`.
 - **Copy** — copy the package folder into your project's `Packages/` directory.
 
@@ -310,6 +310,30 @@ and indexers use the same mechanism. `is` and `as` use the same marker table.
 With a reference to another BetterUdon behaviour, fields, properties, indexers and methods behave like
 C#. The callee body is inlined against the receiver, so calls are synchronous. `SendCustomEvent` remains
 available when you actually want asynchronous dispatch.
+
+`Instantiate` also understands behaviour references:
+
+```csharp
+[SerializeField] private BetterUdonCubeBehaviour cubePrefab;
+
+public void Spawn()
+{
+    BetterUdonCubeBehaviour clone = Instantiate(cubePrefab);
+    clone.Tint(Color.red);                    // ordinary cross-behaviour call
+
+    GameObject cloneObject = Instantiate(cubePrefab.gameObject);
+    BetterUdonCubeBehaviour lookup = cloneObject.GetComponent<BetterUdonCubeBehaviour>();
+
+    Destroy(clone.gameObject);
+}
+```
+
+`Instantiate(behaviour)` clones the backing GameObject and resolves the clone's own backing
+`UdonBehaviour`, so the returned reference is usable immediately. `Instantiate(gameObject)` returns the
+clone GameObject. The C# component on the clone is only the edit-time view; runtime values live in the
+clone's Udon heap. Multi-argument `Instantiate(original, parent/position/rotation)` is not supported yet;
+instantiate first, then set the transform. `Destroy(clone)` destroys only the component, so use
+`Destroy(clone.gameObject)` to remove the spawned object.
 
 ### Networking
 
